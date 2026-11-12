@@ -2,6 +2,7 @@
   "name": "protein-sonification-frontend",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -9,13 +10,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@types/three": "^0.187.0",
+    "3dmol": "^2.4.0",
+    "axios": "^1.6.8",
+    "clsx": "^2.1.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "three": "^0.187.0",
     "tone": "^14.7.77",
-    "zustand": "^4.5.2",
-    "axios": "^1.6.8",
-    "3dmol": "^2.4.0",
-    "clsx": "^2.1.1"
+    "zustand": "^4.5.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.1",

@@ -2,14 +2,44 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
-  height: 100%;
-  background-color: #f5f5f7;
-  color: #1a1a2e;
+@layer base {
+  html, body, #root {
+    height: 100%;
+    background-color: #F8FAFC;
+    color: #0F172A;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #13131f; }
-::-webkit-scrollbar-thumb { background: #2a2a3d; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #3a3a50; }
+/* Clean Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #94A3B8;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748B;
+}
+
+/* Hide scrollbars on horizontal mobile pill bars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Monospace data utilities */
+.font-mono-data {
+  font-family: 'JetBrains Mono', 'Geist Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}

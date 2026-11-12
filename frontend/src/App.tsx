@@ -1,772 +1,481 @@
-import { useRef, useState, useEffect } from 'react'
-import { FASTAInput } from './components/FASTAInput/FASTAInput'
-import { StructureViewer } from './components/StructureViewer/StructureViewer'
-import type { StructureViewerHandle } from './components/StructureViewer/StructureViewer'
-import { PlaybackControls } from './components/Sonification/PlaybackControls'
-import { FeatureHeatmap } from './components/FeaturePanel/FeatureHeatmap'
+import { useState, useEffect } from 'react'
 import { DocsPage } from './components/DocsPage'
-import { AboutPage } from './components/AboutPage'
 import { useProteinStore } from './store/proteinStore'
-import { useProteinQuery } from './hooks/useProteinQuery'
-import { exportAudio } from './components/Sonification/ExportEngine'
-import type { AudioExportFormat } from './components/Sonification/ExportEngine'
-import { STYLE_PRESETS } from './components/Sonification/StyleEngine'
-import { applyAlgorithm } from './components/Sonification/AlgorithmEngine'
+import { useGameStore } from './store/gameStore'
+import { ALGORITHM_LABELS } from './components/Sonification/AlgorithmEngine'
+import type { SonifyAlgorithm } from './components/Sonification/AlgorithmEngine'
+import { GameView } from './game/GameView'
+import { CAMPAIGN_LEVELS, createCustomProteinLevel } from './game/levels'
 
-const card = 'bg-white rounded-xl border border-[#e0e0e0] p-5'
-
-// ── Protein wireframe background ──────────────────────────────────────────────
-const BG_NODES: [number, number][] = [
-  [80, 430], [165, 370], [235, 310], [308, 265], [385, 248],
-  [455, 275], [514, 330], [572, 342], [642, 312], [702, 258],
-  [762, 218], [832, 208], [904, 238], [962, 290], [1024, 302],
-  [1082, 272], [1142, 228], [1204, 218], [1264, 252], [1322, 292],
-  [1352, 335], [1330, 382], [1280, 414], [1218, 402], [1158, 381],
-  [1098, 362], [1038, 382], [978, 412], [916, 422], [858, 402],
-  [798, 372], [738, 362], [678, 382], [618, 412], [558, 432],
-  [498, 422], [438, 402], [378, 393], [318, 412], [258, 442],
-  [198, 462], [138, 452],
-]
-
-function smoothPath(pts: [number, number][]): string {
-  if (pts.length < 2) return ''
-  let d = `M ${pts[0][0]} ${pts[0][1]}`
-  for (let i = 1; i < pts.length - 1; i++) {
-    const mx = (pts[i][0] + pts[i + 1][0]) / 2
-    const my = (pts[i][1] + pts[i + 1][1]) / 2
-    d += ` Q ${pts[i][0]} ${pts[i][1]}, ${mx} ${my}`
-  }
-  const last = pts[pts.length - 1]
-  d += ` L ${last[0]} ${last[1]}`
-  return d
-}
-
-function ProteinBackground() {
-  return (
-    <svg
-      viewBox="0 0 1440 780"
-      preserveAspectRatio="xMidYMid slice"
-      className="absolute inset-0 w-full h-full pointer-events-none"
-      aria-hidden="true"
-    >
-      {/* main backbone */}
-      <path
-        d={smoothPath(BG_NODES)}
-        stroke="#d0d0d0"
-        strokeWidth="2"
-        fill="none"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* secondary loop — offset version for depth */}
-      <path
-        d={smoothPath(BG_NODES.map(([x, y]) => [x + 22, y - 28]))}
-        stroke="#e0e0e0"
-        strokeWidth="1.2"
-        fill="none"
-        strokeLinecap="round"
-        strokeDasharray="6 6"
-      />
-      {/* connector stubs from backbone to loop */}
-      {BG_NODES.filter((_, i) => i % 3 === 0).map(([x, y], i) => (
-        <line
-          key={i}
-          x1={x} y1={y}
-          x2={x + 22} y2={y - 28}
-          stroke="#d8d8d8"
-          strokeWidth="1"
-        />
-      ))}
-      {/* nodes */}
-      {BG_NODES.map(([x, y], i) => (
-        <circle key={i} cx={x} cy={y} r={i % 5 === 0 ? 5 : 3.5}
-          fill="white" stroke="#c8c8c8" strokeWidth="1.5" />
-      ))}
-      {/* secondary loop nodes */}
-      {BG_NODES.filter((_, i) => i % 3 === 0).map(([x, y], i) => (
-        <circle key={i} cx={x + 22} cy={y - 28} r="2.5"
-          fill="white" stroke="#d8d8d8" strokeWidth="1" />
-      ))}
-    </svg>
-  )
-}
-
-// ── Landing page ──────────────────────────────────────────────────────────────
 const EXAMPLE_INSULIN = `>INS_HUMAN Insulin preprotein
 MALWMRLLPLLALLALWGPDPAAAFVNQHLCGSHLVEALYLVCGERGFFYTPKTRREAEDLQVGQVELGGGPGAGSLQPLALEGSLQKRGIVEQCCTSICSLYQLENYCN`
 
 const EXAMPLE_GFP = `>GFP Green Fluorescent Protein
 MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLTYGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITLGMDELYK`
 
-const EXAMPLE_MYOGLOBIN = 'P02144'
+const EXAMPLE_LYSOZYME = `>LYSC_HUMAN Lysozyme C
+KVFERCELARTLKRLGMDGYRGISLANWMCLAKWESGYNTRATNYNAGDRSTDYGIFQINSRYWCNDGKTPGAVNACHLSCSALLQDNIADAVACAKRVVRDPQGIRAWVAWRNRCQNRDVRQYVQGCGV`
 
-type PageType = 'landing' | 'dashboard' | 'docs' | 'about'
+const EXAMPLE_MYOGLOBIN = `>MYG_HUMAN Myoglobin (P02144)
+MGLSDGEWQLVLNVWGKVEADIPGHGQEVLIRLFKGHPETLEKFDKFKHLKSEDEMKASEDLKKHGATVLTALGGILKKKGHHEAEIKPLAQSHATKHKIPVKYLEFISECIIQVLQSKHPGDFGADAQGAMNKALELFRKDMASNYKELGFQG`
 
-function LandingPage({ onEnter, onNavigate }: { onEnter: () => void; onNavigate: (page: PageType) => void }) {
-  const { fasta, setFasta } = useProteinStore()
-  const { submit } = useProteinQuery()
-  const [showMethodology, setShowMethodology] = useState(false)
-  const [showAbout, setShowAbout] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => setFasta(ev.target?.result as string)
-    reader.readAsText(file)
-  }
-
-  const handleSubmit = () => {
-    if (!fasta.trim()) return
-    submit()
-    onEnter()
-  }
-
-  return (
-    <div className="min-h-screen bg-white text-[#1a1a2e] flex flex-col relative overflow-hidden">
-      <ProteinBackground />
-
-      {/* Nav */}
-      <nav className="relative z-10 flex justify-end items-center gap-5 sm:gap-8 px-5 sm:px-10 py-4 sm:py-5">
-        <button
-          onClick={() => onNavigate('docs')}
-          className="text-sm text-[#1a1a2e] hover:text-[#5b9bd5] transition-colors font-medium"
-        >
-          docs
-        </button>
-        <button
-          onClick={() => setShowMethodology(true)}
-          className="text-sm text-[#1a1a2e] hover:text-[#5b9bd5] transition-colors font-medium"
-        >
-          methodology
-        </button>
-        <button
-          onClick={() => setShowAbout(true)}
-          className="text-sm text-[#1a1a2e] hover:text-[#5b9bd5] transition-colors font-medium"
-        >
-          about
-        </button>
-      </nav>
-
-      {/* Hero content */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-5 sm:gap-6 px-5 sm:px-8 -mt-4 sm:-mt-8">
-        <h1 className="text-5xl sm:text-6xl md:text-[72px] font-bold tracking-tight text-center leading-none">
-          SonoFold
-        </h1>
-        <p className="text-base sm:text-lg text-[#555] text-center max-w-[520px] leading-relaxed">
-          minimalist biology-inspired tool for predicting protein structure
-          and transforming it into music using ESMFold.
-        </p>
-
-        {/* Input row */}
-        <div className="flex flex-col sm:flex-row gap-2 w-full max-w-[540px]">
-          <input
-            type="text"
-            value={fasta}
-            onChange={(e) => setFasta(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-            placeholder="Enter UniProt ID or Sequence"
-            className="flex-1 rounded-lg border border-[#d8d8d8] bg-white/80 px-4 py-3
-                       text-sm text-[#1a1a2e] placeholder-[#aaa] focus:outline-none
-                       focus:ring-2 focus:ring-[#5b9bd5]/30 transition-colors"
-          />
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="flex items-center justify-center gap-1.5 rounded-lg border border-[#d8d8d8] bg-white
-                       px-4 py-3 text-sm text-[#444] hover:bg-[#f5f5f7] transition-colors whitespace-nowrap"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            upload FASTA
-          </button>
-          <input ref={fileRef} type="file" accept=".fasta,.fa,.txt" className="hidden" onChange={handleFile} />
-        </div>
-
-        {/* Analyze button */}
-        <button
-          onClick={handleSubmit}
-          disabled={!fasta.trim()}
-          className="w-full max-w-[540px]
-                     bg-[#1e3a4f] hover:bg-[#162d3e] disabled:bg-[#ccc] disabled:cursor-not-allowed
-                     text-white py-3.5 rounded-lg text-base font-semibold transition-colors"
-        >
-          music to my ears
-        </button>
-
-        {/* Load examples */}
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-[#aaa]">Try:</span>
-          <button
-            onClick={() => setFasta(EXAMPLE_INSULIN)}
-            className="text-sm text-[#5b9bd5] hover:underline"
-          >
-            Insulin
-          </button>
-          <span className="text-[#ddd]">·</span>
-          <button
-            onClick={() => setFasta(EXAMPLE_GFP)}
-            className="text-sm text-[#5b9bd5] hover:underline"
-          >
-            GFP
-          </button>
-          <span className="text-[#ddd]">·</span>
-          <button
-            onClick={() => setFasta(EXAMPLE_MYOGLOBIN)}
-            className="text-sm text-[#5b9bd5] hover:underline"
-          >
-            Myoglobin <span className="text-[#aaa] text-xs">(P02144)</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="relative z-10 pb-5 text-center">
-        <p className="text-xs text-[#bbb]">
-          developed by{' '}
-          <a
-            href="https://dataapps.agency"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[#5b9bd5] hover:underline"
-          >
-            dataapps.agency
-          </a>
-        </p>
-      </div>
-
-      {/* Methodology modal */}
-      {showMethodology && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setShowMethodology(false)}
-        >
-          <div
-            className="bg-white rounded-2xl border border-[#e0e0e0] shadow-xl w-full max-w-2xl mx-4 p-8 max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between mb-6">
-              <p className="text-xs text-[#5b9bd5] font-semibold uppercase tracking-widest">Methodology</p>
-              <button
-                onClick={() => setShowMethodology(false)}
-                className="ml-4 text-[#999] hover:text-[#1a1a2e] transition-colors shrink-0"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Paper 1 */}
-            <div className="rounded-xl border border-[#e0e0e0] p-5 mb-4">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#5b9bd5] mb-1">Heliyon · CellPress · 2021</p>
-              <h2 className="text-sm font-bold leading-snug mb-1">
-                Protein music of enhanced musicality by music style guided exploration
-                of diverse amino acid properties
-              </h2>
-              <p className="text-xs text-[#888] mb-3">
-                Nicole Morriti Tay, Fanel Lu, Chasein Wong, Hui Zhong, Peng Zhong, Yu Zong Chen ·
-                Heliyon, Vol. 7, Issue 9, September 2021, e07933
-              </p>
-              <p className="text-sm text-[#555] mb-3">
-                Establishes the primary amino-acid → musical parameter mapping used by SonoFold's
-                default Fantaisie-Impromptu algorithm. Properties such as residue volume, EIIP group,
-                and rRNA/mRNA binding propensity are translated into pitch, octave, duration, chord,
-                velocity, and hand assignment for a two-voice piano score.
-              </p>
-              <a
-                href="https://doi.org/10.1016/j.heliyon.2021.e07933"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs text-[#5b9bd5] hover:underline font-medium"
-              >
-                doi:10.1016/j.heliyon.2021.e07933
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
-              </a>
-            </div>
-
-            {/* Paper 2 */}
-            <div className="rounded-xl border border-[#e0e0e0] p-5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#5b9bd5] mb-1">BMC Bioinformatics · 2021</p>
-              <h2 className="text-sm font-bold leading-snug mb-1">
-                Using sound to understand protein sequence data
-              </h2>
-              <p className="text-xs text-[#888] mb-3">
-                Eddie Martin et al. · BMC Bioinformatics 22: 490
-              </p>
-              <p className="text-sm text-[#555] mb-3">
-                Describes five distinct sonification algorithms (Sonifyed I–V) mapping protein
-                sequences to musical output via hydrophobicity scales, reduced chemical-group
-                alphabets, and Shannon sequence entropy. SonoFold re-implements all five adapted
-                for single-sequence use.
-              </p>
-              <a
-                href="https://doi.org/10.1186/s12859-021-04362-7"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs text-[#5b9bd5] hover:underline font-medium"
-              >
-                doi:10.1186/s12859-021-04362-7
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
-              </a>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* About modal */}
-      {showAbout && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setShowAbout(false)}
-        >
-          <div
-            className="bg-white rounded-2xl border border-[#e0e0e0] shadow-xl w-full max-w-lg mx-4 p-8 max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-start justify-between mb-6">
-              <p className="text-xs text-[#5b9bd5] font-semibold uppercase tracking-widest">About</p>
-              <button
-                onClick={() => setShowAbout(false)}
-                className="text-[#999] hover:text-[#1a1a2e] transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Profile */}
-            <div className="rounded-xl border border-[#e0e0e0] p-6 mb-6">
-              <h2 className="text-xl font-bold tracking-tight mb-4">Daramola Oluwasegun Isaac</h2>
-              <div className="flex gap-2 flex-wrap">
-                <a href="https://www.linkedin.com/in/oluwasegun-isaac-daramola" target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#e0e0e0] bg-white hover:bg-[#f5f5f7] transition-colors text-sm font-medium text-[#1a1a2e]">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-                  </svg>
-                  LinkedIn
-                </a>
-                <a href="https://github.com/OluwasegunIsaac" target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#e0e0e0] bg-white hover:bg-[#f5f5f7] transition-colors text-sm font-medium text-[#1a1a2e]">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
-                  </svg>
-                  GitHub
-                </a>
-                <a href="https://orcid.org/0000-0001-9956-7274" target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#e0e0e0] bg-white hover:bg-[#f5f5f7] transition-colors text-sm font-medium text-[#1a1a2e]">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="#a6ce39">
-                    <path d="M12 0C5.372 0 0 5.372 0 12s5.372 12 12 12 12-5.372 12-12S18.628 0 12 0zM7.369 4.378c.525 0 .947.431.947.947s-.422.947-.947.947a.95.95 0 01-.947-.947c0-.516.422-.947.947-.947zm-.722 3.038h1.444v10.041H6.647V7.416zm3.562 0h3.9c3.712 0 5.344 2.653 5.344 5.025 0 2.578-2.016 5.016-5.325 5.016h-3.919V7.416zm1.444 1.303v7.444h2.297c2.359 0 3.928-1.316 3.928-3.722 0-2.016-1.284-3.722-3.928-3.722h-2.297z"/>
-                  </svg>
-                  ORCID
-                </a>
-              </div>
-            </div>
-
-            {/* About the project */}
-            <div className="text-sm text-[#444] space-y-3 mb-6">
-              <p>
-                SonoFold implements protein sonification based on two peer-reviewed publication frameworks:
-                the amino acid property mapping of <strong>Tay et al. (Heliyon, 2021)</strong> and the
-                five Sonifyed algorithms of <strong>Martin et al. (BMC Bioinformatics, 2021)</strong>.
-              </p>
-              <p>
-                Structure prediction is powered by <strong>ESMFold</strong> (Meta AI) for new sequences
-                and the <strong>AlphaFold EBI database</strong> for known UniProt accessions.
-              </p>
-            </div>
-
-            {/* Publications */}
-            <div className="border-t border-[#f0f0f0] pt-5 space-y-2 text-xs text-[#666]">
-              <p>[1] Tay NM et al. <em>Protein music of enhanced musicality…</em> Heliyon 7(9): e07933, 2021.{' '}
-                <a className="text-[#5b9bd5] hover:underline" href="https://doi.org/10.1016/j.heliyon.2021.e07933" target="_blank" rel="noopener noreferrer">doi:10.1016/j.heliyon.2021.e07933</a>
-              </p>
-              <p>[2] Martin E et al. <em>Using sound to understand protein sequence data.</em> BMC Bioinformatics 22: 490, 2021.{' '}
-                <a className="text-[#5b9bd5] hover:underline" href="https://doi.org/10.1186/s12859-021-04362-7" target="_blank" rel="noopener noreferrer">doi:10.1186/s12859-021-04362-7</a>
-              </p>
-            </div>
-
-            <div className="border-t border-[#f0f0f0] pt-4 mt-2 text-center">
-              <p className="text-xs text-[#bbb]">
-                Developed by{' '}
-                <a
-                  href="https://dataapps.agency"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[#5b9bd5] hover:underline"
-                >
-                  dataapps.agency
-                </a>
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Root ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  const { status, errorMessage, events, bpm, style, algorithm, durationScale, pdb, fasta } = useProteinStore()
+  const { fasta, setFasta } = useProteinStore()
 
-  // Derive a short label + best-match database URL from the user's input
-  const proteinMeta = (() => {
-    if (!fasta) return null
-    const trimmed = fasta.trim()
+  const {
+    activeTab,
+    setActiveTab,
+    completedLevelIds,
+    devBypassUnlocked,
+    theme,
+    toggleTheme,
+    startCustomLevel,
+  } = useGameStore()
 
-    // ── FASTA header ──────────────────────────────────────────────────────────
-    if (trimmed.startsWith('>')) {
-      const header = trimmed.split('\n')[0].replace(/^>\s*/, '')
-      const label = header.split(/\s+/).slice(0, 4).join(' ') || null
-      if (!label) return null
+  const isLight = theme === 'light'
 
-      // sp|P12345|... or tr|A0A000|... → UniProt
-      const uniprotInHeader = header.match(/(?:sp|tr)\|([A-Z0-9]{6,10})\|/)
-      if (uniprotInHeader)
-        return { label, url: `https://www.uniprot.org/uniprotkb/${uniprotInHeader[1]}` }
-
-      // PDB-style: 4-char + optional chain e.g. 1ABC or 1ABC_A
-      const pdbInHeader = header.match(/\b([1-9][A-Z0-9]{3})(?:_[A-Za-z])?\b/)
-      if (pdbInHeader)
-        return { label, url: `https://www.rcsb.org/structure/${pdbInHeader[1].toUpperCase()}` }
-
-      // Fallback: NCBI text search
-      const query = encodeURIComponent(label)
-      return { label, url: `https://www.ncbi.nlm.nih.gov/protein/?term=${query}` }
-    }
-
-    const id = trimmed.trim()
-
-    // UniProt accession: P12345 / A0A000ABC1 (6–10 alphanumeric, optionally -N isoform)
-    if (/^[OPQ][0-9][A-Z0-9]{3}[0-9](-\d+)?$/i.test(id) ||
-        /^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}(-\d+)?$/i.test(id))
-      return { label: id.toUpperCase(), url: `https://www.uniprot.org/uniprotkb/${id.toUpperCase()}` }
-
-    // UniProt entry name: GENE_ORGANISM (e.g. INS_HUMAN)
-    if (/^[A-Z0-9]{1,5}_[A-Z]{2,5}$/i.test(id))
-      return { label: id.toUpperCase(), url: `https://www.uniprot.org/uniprotkb?query=${encodeURIComponent(id)}` }
-
-    // PDB ID: exactly 4 chars starting with digit
-    if (/^[1-9][A-Z0-9]{3}$/i.test(id))
-      return { label: id.toUpperCase(), url: `https://www.rcsb.org/structure/${id.toUpperCase()}` }
-
-    // NCBI protein accession: e.g. NP_000198, XP_012345678, AAB12345
-    if (/^[A-Z]{2}_?\d{6,9}(\.\d+)?$/i.test(id))
-      return { label: id.toUpperCase(), url: `https://www.ncbi.nlm.nih.gov/protein/${id}` }
-
-    // RefSeq / GenBank protein (1-2 letters + 5-8 digits)
-    if (/^[A-Z]{1,2}\d{5,8}(\.\d+)?$/i.test(id))
-      return { label: id.toUpperCase(), url: `https://www.ncbi.nlm.nih.gov/protein/${id}` }
-
-    // Pfam accession: PF00001
-    if (/^PF\d{5}$/i.test(id))
-      return { label: id.toUpperCase(), url: `https://www.ebi.ac.uk/interpro/entry/pfam/${id.toUpperCase()}/` }
-
-    // InterPro: IPR000001
-    if (/^IPR\d{6}$/i.test(id))
-      return { label: id.toUpperCase(), url: `https://www.ebi.ac.uk/interpro/entry/InterPro/${id.toUpperCase()}/` }
-
-    // Generic short alphanumeric fallback → UniProt search
-    if (/^[A-Z0-9_-]{2,20}$/i.test(id))
-      return { label: id.toUpperCase(), url: `https://www.uniprot.org/uniprotkb?query=${encodeURIComponent(id)}` }
-
-    return null
-  })()
-
-  // ── Fetch human-readable protein name from UniProt when accession is detected ──
+  // Custom Protein Folding Builder state
+  const [customTitle, setCustomTitle] = useState('Human Lysozyme C')
+  const [customSubunitCount, setCustomSubunitCount] = useState<2 | 3 | 4>(3)
+  const [customAlgo, setCustomAlgo] = useState<SonifyAlgorithm>('Fantaisie-Impromptu')
   const [resolvedProteinName, setResolvedProteinName] = useState<string | null>(null)
 
+  // Support optional URL query ?dev=1 for internal testing while keeping dev controls hidden in production
   useEffect(() => {
-    setResolvedProteinName(null)
-    if (!fasta) return
-    const trimmed = fasta.trim()
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('dev') === '1' && !devBypassUnlocked) {
+      useGameStore.setState({ devBypassUnlocked: true })
+    }
+  }, [devBypassUnlocked])
 
-    // Extract accession from bare ID or sp|ACC| FASTA header
-    let accession: string | null = null
-    const headerMatch = trimmed.match(/(?:sp|tr)\|([A-Z0-9]{6,10})\|/i)
-    if (headerMatch) {
-      accession = headerMatch[1].toUpperCase()
-    } else if (
-      /^[OPQ][0-9][A-Z0-9]{3}[0-9](-\d+)?$/i.test(trimmed) ||
-      /^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}(-\d+)?$/i.test(trimmed)
-    ) {
-      accession = trimmed.toUpperCase().split('-')[0]
+  // Resolve UniProt metadata when user enters an accession code
+  useEffect(() => {
+    const trimmed = fasta.trim()
+    const isAccession = /^[A-Z0-9]{6,10}$/i.test(trimmed)
+    if (!isAccession) {
+      setResolvedProteinName(null)
+      return
     }
 
-    if (!accession) return
-    const acc = accession
     let cancelled = false
-
-    fetch(`https://rest.uniprot.org/uniprotkb/${acc}.json`)
+    fetch(`https://rest.uniprot.org/uniprotkb/${trimmed.toUpperCase()}.json`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return
         const name =
           data?.proteinDescription?.recommendedName?.fullName?.value ||
-          data?.proteinDescription?.submittedNames?.[0]?.fullName?.value ||
+          data?.proteinDescription?.submissionNames?.[0]?.fullName?.value ||
           null
         const gene = data?.genes?.[0]?.geneName?.value ?? null
-        if (name) setResolvedProteinName(gene ? `${name} (${gene})` : name)
+        if (name) {
+          const fullTitle = gene ? `${name} (${gene})` : name
+          setResolvedProteinName(fullTitle)
+          setCustomTitle(fullTitle)
+        }
       })
       .catch(() => {})
 
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [fasta])
 
-  // Label shown in the panel: resolved name > raw accession/header
-  const displayLabel = resolvedProteinName ?? proteinMeta?.label ?? null
-
-  const [page, setPage] = useState<PageType>('landing')
-  const [showExport, setShowExport] = useState(false)
-  const [audioFormat, setAudioFormat] = useState<AudioExportFormat>('MP3')
-  const [audioStatus, setAudioStatus] = useState('')
-  const structureRef = useRef<StructureViewerHandle>(null)
-
-  const handleExportPdb = () => {
-    if (!pdb) return
-    const blob = new Blob([pdb], { type: 'chemical/x-pdb' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'structure.pdb'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(url), 400)
+  const handleLaunchCustomFoldGame = () => {
+    const rawInput = fasta.trim() || EXAMPLE_LYSOZYME
+    const lvl = createCustomProteinLevel(
+      resolvedProteinName || customTitle || 'Custom Protein Complex',
+      rawInput,
+      customSubunitCount,
+      customAlgo,
+    )
+    startCustomLevel(lvl)
   }
 
-  const preset = { ...STYLE_PRESETS[style], durationScale }
+  // Unlocked once the first 5 easy levels are solved
+  const easyLevelsCleared = [1, 2, 3, 4, 5].filter((id) => completedLevelIds.includes(id)).length
+  const isCustomFoldUnlocked =
+    easyLevelsCleared >= 5 || completedLevelIds.length >= 5 || devBypassUnlocked
 
-  const handleExportAudio = async () => {
-    setAudioStatus('Rendering…')
-    try {
-      const transformedEvents = applyAlgorithm(events, algorithm)
-      await exportAudio(transformedEvents, bpm, preset, audioFormat, (p) =>
-        setAudioStatus(`Rendering… ${Math.round(p * 100)}%`),
-      )
-      setAudioStatus('Downloaded!')
-    } catch (e) { setAudioStatus(`Error: ${String(e)}`) }
-    setTimeout(() => setAudioStatus(''), 3000)
-  }
-
-  if (page === 'docs') return <DocsPage onNavigate={setPage} />
-  if (page === 'about') return <AboutPage onNavigate={setPage} />
-
-  if (page === 'landing') {
-    return <LandingPage onEnter={() => setPage('dashboard')} onNavigate={setPage} />
-  }
+  const bgMain = isLight ? 'bg-[#F8FAFC] text-slate-900' : 'bg-[#0B0F17] text-[#E2E8F0]'
+  const headerClass = isLight
+    ? 'border-slate-300 bg-white'
+    : 'border-[#1E293B] bg-[#0B0F17]'
+  const cardClass = isLight
+    ? 'bg-white rounded-xl border border-slate-300 p-5 sm:p-6 text-slate-900 shadow-sm'
+    : 'bg-[#111827] rounded-xl border border-[#1E293B] p-5 sm:p-6 text-[#E2E8F0]'
+  const textMuted = isLight ? 'text-slate-700' : 'text-[#94A3B8]'
+  const inactiveTabClass = isLight
+    ? 'text-slate-700 hover:text-slate-900 hover:bg-slate-100 font-semibold'
+    : 'text-[#94A3B8] hover:text-[#E2E8F0] hover:bg-[#111827] font-semibold'
 
   return (
-    <div className="min-h-screen bg-[#f5f5f7] text-[#1a1a2e] flex flex-col">
-      <div className="flex-1 px-4 sm:px-6 py-3 max-w-[1400px] w-full mx-auto flex flex-col gap-3">
-
-        {/* ── Top bar ── */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setPage('landing')}
-              className="p-1.5 rounded-lg hover:bg-[#e8e8e8] transition-colors text-[#555] hover:text-[#1a1a2e]"
-              title="Back to home"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <h1 className="text-lg sm:text-2xl font-bold tracking-tight">SonoFold Workspace</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowExport(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[#e0e0e0]
-                         bg-white text-sm font-medium text-[#1a1a2e] hover:bg-[#f5f5f7] transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round"
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-              Export
-            </button>
-          </div>
-        </div>
-
-        {/* ── Main row ── */}
-        <div className="flex flex-col lg:flex-row gap-5 items-stretch flex-1">
-
-          {/* Left sidebar — full width on mobile, 300px on desktop */}
-          <div className="w-full lg:w-[300px] lg:shrink-0 flex flex-col gap-4">
-
-            {/* Protein Sequence card */}
-            <div className={card}>
-              <h2 className="text-base font-semibold mb-3">Protein Sequence</h2>
-              <FASTAInput />
-            </div>
-
-            {status === 'error' && (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {errorMessage}
-              </div>
-            )}
-
-            {/* Audio Controls card — grows to fill remaining height */}
-            {status === 'ready' ? (
-              <div className={`${card} flex-1 flex flex-col`}>
-                <h2 className="text-base font-semibold mb-4">Audio Controls</h2>
-                <PlaybackControls />
-              </div>
-            ) : (
-              <div className="flex-1" />
-            )}
-          </div>
-
-          {/* Center + Heatmap column */}
-          <div className="flex-1 flex flex-col gap-5 min-w-0">
-            {/* 3D structure viewer */}
-            <div className={`${card} flex flex-col`}>
-              <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
-                {displayLabel && proteinMeta ? (
-                  <>
-                    <a
-                      href={proteinMeta.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[#5b9bd5] hover:underline underline-offset-2 flex items-center gap-1"
-                      title="Open in protein database"
-                    >
-                      {displayLabel}
-                      <svg className="w-3 h-3 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                      </svg>
-                    </a>
-                    <span className="text-[#aaa] font-normal">·</span>
-                    <span>3D Structure</span>
-                  </>
-                ) : '3D Structure'}
-              </h2>
-              <StructureViewer ref={structureRef} />
-            </div>
-
-            {/* Feature Heatmap — fills remaining space below viewer */}
-            <div className={`${card} flex-1`}>
-              <h2 className="text-base font-semibold mb-5">Feature Heatmap</h2>
-              <FeatureHeatmap />
-            </div>
-          </div>
-        </div>
-
-        {/* ── Footer ── */}
-        <p className="text-xs text-[#999] text-center pb-2">
-          Data source: ESMFold &amp; AlphaFold &middot; 2021
-        </p>
-      </div>
-
-      {/* ── Export modal ── */}
-      {showExport && (
+    <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${bgMain}`}>
+      {/* ── Top Navigation Bar (Mobile & Desktop Optimized) ────────────────── */}
+      <header
+        className={`h-14 border-b px-2.5 sm:px-6 flex items-center justify-between shrink-0 select-none ${headerClass}`}
+      >
+        {/* Brand: SnapFold */}
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => setShowExport(false)}
+          onClick={() => setActiveTab('game')}
+          className="flex items-center space-x-2 sm:space-x-2.5 cursor-pointer"
         >
-          <div
-            className="bg-white rounded-2xl border border-[#e0e0e0] shadow-xl w-full max-w-lg mx-4 p-8"
-            onClick={(e) => e.stopPropagation()}
+          <div className="w-7 h-7 bg-[#FF5500] rounded flex items-center justify-center font-mono font-bold text-black text-xs sm:text-sm shrink-0">
+            SF
+          </div>
+          <div>
+            <div className="flex items-center space-x-1.5">
+              <span className="font-mono font-bold text-sm sm:text-base tracking-tight">
+                SnapFold
+              </span>
+              <span
+                className={`hidden md:inline text-[11px] font-mono px-2 py-0.5 rounded font-bold ${
+                  isLight ? 'bg-sky-100 text-sky-800' : 'bg-[#1E293B] text-[#00F5D4]'
+                }`}
+              >
+                3D Protein Game
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation Tabs (Merged Docs & About) */}
+        <nav className="flex items-center space-x-1 sm:space-x-2">
+          <button
+            onClick={() => setActiveTab('game')}
+            className={`px-2.5 sm:px-3.5 py-1.5 text-xs font-mono rounded-lg transition-colors flex items-center space-x-1.5 ${
+              activeTab === 'game'
+                ? isLight
+                  ? 'bg-orange-100 text-orange-900 font-bold border border-orange-400'
+                  : 'bg-[#FF5500]/15 text-[#FF5500] font-bold border border-[#FF5500]/50'
+                : inactiveTabClass
+            }`}
           >
-            {/* Modal header */}
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold">Export Data</h2>
-              <button onClick={() => setShowExport(false)} className="text-[#999] hover:text-[#1a1a2e] transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+            <span>🎮</span>
+            <span className="hidden sm:inline">Play (10 Levels)</span>
+            <span className="sm:hidden">Play</span>
+          </button>
 
-            {/* 3D Structure Export section */}
-            <div className="mb-6">
-              <h3 className="text-base font-semibold mb-3">3D Structure Export</h3>
-              <div className="flex flex-col gap-3">
-                <p className="text-sm text-[#555]">
-                  Export the current 3D render as an image or download the raw structure file.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {(['PNG', 'JPEG', 'SVG'] as const).map((fmt) => (
-                    <button
-                      key={fmt}
-                      disabled={!pdb}
-                      onClick={() => {
-                        if (fmt === 'PNG') structureRef.current?.exportPng()
-                        else if (fmt === 'JPEG') structureRef.current?.exportJpeg()
-                        else structureRef.current?.exportSvg()
-                      }}
-                      className="px-4 py-2 rounded-lg border border-[#d0d0d0] bg-white hover:bg-[#f5f5f7]
-                                 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium
-                                 text-[#1a1a2e] transition-colors"
-                    >
-                      {fmt}
-                    </button>
-                  ))}
-                  <button
-                    disabled={!pdb}
-                    onClick={handleExportPdb}
-                    className="px-4 py-2 rounded-lg border border-[#d0d0d0] bg-white hover:bg-[#f5f5f7]
-                               disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium
-                               text-[#1a1a2e] transition-colors"
-                  >
-                    PDB (3D)
-                  </button>
-                </div>
-              </div>
-            </div>
+          <button
+            onClick={() => setActiveTab('custom')}
+            className={`px-2.5 sm:px-3.5 py-1.5 text-xs font-mono rounded-lg transition-colors flex items-center space-x-1.5 ${
+              activeTab === 'custom'
+                ? isLight
+                  ? 'bg-sky-100 text-sky-900 font-bold border border-sky-400'
+                  : 'bg-[#1E293B] text-[#00F5D4] font-bold border border-[#00F5D4]/40'
+                : inactiveTabClass
+            }`}
+          >
+            <span>{isCustomFoldUnlocked ? '🧬' : '🔒'}</span>
+            <span className="hidden sm:inline">Fold Custom</span>
+            <span className="sm:hidden">Custom</span>
+            {!isCustomFoldUnlocked && (
+              <span
+                className={`text-[10px] px-1.5 rounded font-bold ${
+                  isLight ? 'bg-orange-100 text-orange-800' : 'bg-[#FF5500]/20 text-[#FF5500]'
+                }`}
+              >
+                {easyLevelsCleared}/5
+              </span>
+            )}
+          </button>
 
-            {/* Audio Export section */}
-            <div className="mb-6">
-              <h3 className="text-base font-semibold mb-3">Audio Export</h3>
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-3">
-                  <label className="text-sm text-[#555] w-16 shrink-0">Format:</label>
-                  <select
-                    value={audioFormat}
-                    onChange={(e) => setAudioFormat(e.target.value as AudioExportFormat)}
-                    className="flex-1 rounded-lg border border-[#d0d0d0] bg-white px-3 py-2 text-sm
-                               text-[#1a1a2e] focus:outline-none focus:ring-2 focus:ring-[#5b9bd5]/30"
-                  >
-                    <option value="MP3">MP3</option>
-                    <option value="Ambient">Ambient</option>
-                    <option value="MIDI">MIDI</option>
-                  </select>
+          <button
+            onClick={() => setActiveTab('docs')}
+            className={`px-2.5 sm:px-3.5 py-1.5 text-xs font-mono rounded-lg transition-colors ${
+              activeTab === 'docs' || activeTab === 'about'
+                ? isLight
+                  ? 'bg-slate-200 text-slate-900 font-bold border border-slate-400'
+                  : 'bg-[#1E293B] text-[#E2E8F0] font-bold border border-slate-600'
+                : inactiveTabClass
+            }`}
+          >
+            <span className="hidden sm:inline">📖 Docs &amp; About</span>
+            <span className="sm:hidden">📖 Docs</span>
+          </button>
+        </nav>
+
+        {/* Right Theme Toggle */}
+        <div className="flex items-center space-x-1.5">
+          <button
+            onClick={toggleTheme}
+            className={`px-2.5 py-1.5 text-xs font-mono font-semibold rounded-lg border transition-colors flex items-center space-x-1 ${
+              isLight
+                ? 'bg-slate-100 border-slate-300 text-slate-900 hover:border-[#FF5500]'
+                : 'bg-[#111827] border-[#1E293B] text-[#E2E8F0] hover:border-[#00F5D4]'
+            }`}
+            title="Switch between Light Mode and Dark Mode"
+          >
+            <span>{isLight ? '🌙' : '☀️'}</span>
+            <span className="hidden md:inline">{isLight ? 'Dark' : 'Light'}</span>
+          </button>
+        </div>
+      </header>
+
+      {/* ── Main Content Views ─────────────────────────────────────────────── */}
+      <main className="flex-1 flex flex-col">
+        {/* TAB 1: 10-Level 3D Ribbon Docking Game */}
+        {activeTab === 'game' && <GameView />}
+
+        {/* TAB 2: Bring Your Own Protein (Unlocked after Level 5) */}
+        {activeTab === 'custom' && (
+          <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
+            {!isCustomFoldUnlocked ? (
+              /* Locked Screen until first 5 Easy Levels are cleared */
+              <div className={`max-w-lg w-full ${cardClass} text-center space-y-6`}>
+                <div className="w-12 h-12 bg-[#FF5500]/15 border border-[#FF5500]/40 text-[#FF5500] rounded-full flex items-center justify-center text-2xl mx-auto">
+                  🔒
                 </div>
-                <p className="text-sm text-[#555]">
-                  {audioFormat === 'MIDI'
-                    ? 'Exports a Standard MIDI File (.mid) with right and left hand tracks.'
-                    : audioFormat === 'Ambient'
-                    ? 'Renders the sonification with ambient reverb blend applied, saved as WAV.'
-                    : 'Renders the full protein sonification as a WAV audio file.'}
-                </p>
-                {audioStatus && (
-                  <p className="text-xs font-medium text-[#5b9bd5]">{audioStatus}</p>
-                )}
-                <button
-                  onClick={handleExportAudio}
-                  disabled={events.length === 0}
-                  className="self-start px-5 py-2 rounded-lg bg-[#5b9bd5] hover:bg-[#4a8bc4]
-                             disabled:bg-[#ccc] disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+
+                <div>
+                  <h2 className="text-xl font-mono font-bold tracking-tight mb-2">
+                    Bring Your Own Protein Locked
+                  </h2>
+                  <p className={`text-xs sm:text-sm leading-relaxed ${textMuted}`}>
+                    Complete the first 5 Easy levels in the <strong>SnapFold</strong> campaign to
+                    unlock Custom Protein Folding. Once unlocked, you can bring any FASTA sequence
+                    or UniProt ID, fold its 3D ribbon subunits, and download a video of its 3D
+                    musical score!
+                  </p>
+                </div>
+
+                {/* Easy Levels 1-5 Progress Badges */}
+                <div
+                  className={`p-4 rounded-lg border space-y-2 text-left ${
+                    isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0B0F17] border-[#1E293B]'
+                  }`}
                 >
-                  Export Audio
+                  <div className={`text-xs font-mono font-bold uppercase tracking-wider mb-2 ${textMuted}`}>
+                    Easy Campaign Progress ({easyLevelsCleared} / 5 Solved)
+                  </div>
+                  {CAMPAIGN_LEVELS.slice(0, 5).map((lvl) => {
+                    const isDone = completedLevelIds.includes(lvl.id)
+                    return (
+                      <div
+                        key={lvl.id}
+                        className="flex items-center justify-between text-xs font-mono"
+                      >
+                        <span
+                          className={
+                            isDone
+                              ? isLight
+                                ? 'text-emerald-700 font-bold'
+                                : 'text-emerald-400 font-bold'
+                              : textMuted
+                          }
+                        >
+                          Level {lvl.id}: {lvl.title}
+                        </span>
+                        <span
+                          className={
+                            isDone
+                              ? isLight
+                                ? 'text-emerald-700 font-bold'
+                                : 'text-emerald-400 font-bold'
+                              : textMuted
+                          }
+                        >
+                          {isDone ? '✓ Solved' : 'Pending'}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <button
+                  onClick={() => setActiveTab('game')}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-[#FF5500] hover:bg-[#FF6A1A] text-black text-xs font-mono font-bold rounded-lg"
+                >
+                  Continue Campaign (Levels 1–5) →
                 </button>
               </div>
-            </div>
+            ) : (
+              /* Unlocked: Clean, High-Contrast Custom Protein 3D Puzzle Builder */
+              <div className={`max-w-2xl w-full ${cardClass} space-y-5`}>
+                <div>
+                  <span
+                    className={`text-[11px] font-mono uppercase px-2.5 py-0.5 rounded font-bold ${
+                      isLight
+                        ? 'bg-orange-100 text-orange-800'
+                        : 'bg-[#FF5500]/15 text-[#FF5500]'
+                    }`}
+                  >
+                    Level 5 Reward Unlocked
+                  </span>
+                  <h1 className="text-xl sm:text-2xl font-mono font-bold tracking-tight mt-2">
+                    🧬 Fold Your Own Protein in 3D
+                  </h1>
+                  <p className={`text-xs sm:text-sm mt-1 ${textMuted}`}>
+                    Paste any amino acid sequence (FASTA) or UniProt ID below, choose how many 3D
+                    ribbon subunits to split it into, and fold it in the SnapFold arena.
+                  </p>
+                </div>
 
+                <div className="space-y-4">
+                  {/* Protein Name */}
+                  <div>
+                    <label className={`block text-xs font-mono font-bold uppercase mb-1 ${textMuted}`}>
+                      1. Protein Name
+                    </label>
+                    <input
+                      type="text"
+                      value={customTitle}
+                      onChange={(e) => setCustomTitle(e.target.value)}
+                      placeholder="e.g. Human Lysozyme C"
+                      className={`w-full rounded-lg border px-3 py-2 text-xs sm:text-sm font-mono focus:outline-none focus:border-[#FF5500] ${
+                        isLight
+                          ? 'bg-slate-50 border-slate-300 text-slate-900'
+                          : 'bg-[#0B0F17] border-[#1E293B] text-[#E2E8F0]'
+                      }`}
+                    />
+                  </div>
 
+                  {/* FASTA or UniProt Sequence Input */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className={`text-xs font-mono font-bold uppercase ${textMuted}`}>
+                        2. FASTA Sequence or UniProt Accession
+                      </label>
+                      {resolvedProteinName && (
+                        <span
+                          className={`text-xs font-mono font-bold ${
+                            isLight ? 'text-sky-700' : 'text-[#00F5D4]'
+                          }`}
+                        >
+                          ✓ {resolvedProteinName}
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={fasta}
+                      onChange={(e) => setFasta(e.target.value)}
+                      placeholder="Paste FASTA sequence or UniProt ID (e.g. P01308)..."
+                      className={`w-full rounded-lg border p-3 text-xs font-mono focus:outline-none focus:border-[#FF5500] ${
+                        isLight
+                          ? 'bg-slate-50 border-slate-300 text-slate-900'
+                          : 'bg-[#0B0F17] border-[#1E293B] text-[#E2E8F0]'
+                      }`}
+                    />
+
+                    {/* Quick Presets */}
+                    <div className={`mt-2 flex flex-wrap items-center gap-2 text-xs font-mono ${textMuted}`}>
+                      <span className="font-bold">Quick Presets:</span>
+                      <button
+                        onClick={() => {
+                          setFasta(EXAMPLE_LYSOZYME)
+                          setCustomTitle('Human Lysozyme C')
+                        }}
+                        className={`hover:underline font-bold ${
+                          isLight ? 'text-orange-700' : 'text-[#FF5500]'
+                        }`}
+                      >
+                        Lysozyme
+                      </button>
+                      <span>·</span>
+                      <button
+                        onClick={() => {
+                          setFasta(EXAMPLE_MYOGLOBIN)
+                          setCustomTitle('Human Myoglobin')
+                        }}
+                        className={`hover:underline font-bold ${
+                          isLight ? 'text-orange-700' : 'text-[#FF5500]'
+                        }`}
+                      >
+                        Myoglobin
+                      </button>
+                      <span>·</span>
+                      <button
+                        onClick={() => {
+                          setFasta(EXAMPLE_GFP)
+                          setCustomTitle('Green Fluorescent Protein')
+                        }}
+                        className={`hover:underline font-bold ${
+                          isLight ? 'text-orange-700' : 'text-[#FF5500]'
+                        }`}
+                      >
+                        GFP
+                      </button>
+                      <span>·</span>
+                      <button
+                        onClick={() => {
+                          setFasta(EXAMPLE_INSULIN)
+                          setCustomTitle('Human Insulin')
+                        }}
+                        className={`hover:underline font-bold ${
+                          isLight ? 'text-orange-700' : 'text-[#FF5500]'
+                        }`}
+                      >
+                        Insulin
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Subunit Count & Sonification Algorithm */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className={`block text-xs font-mono font-bold uppercase mb-1 ${textMuted}`}>
+                        3. Ribbon Subunits to Dock
+                      </label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([2, 3, 4] as const).map((cnt) => (
+                          <button
+                            key={cnt}
+                            onClick={() => setCustomSubunitCount(cnt)}
+                            className={`py-2 text-xs font-mono rounded-lg border transition-colors ${
+                              customSubunitCount === cnt
+                                ? 'bg-[#FF5500] text-black border-[#FF5500] font-bold'
+                                : isLight
+                                  ? 'bg-slate-50 border-slate-300 text-slate-900 font-semibold'
+                                  : 'bg-[#0B0F17] border-[#1E293B] text-[#94A3B8]'
+                            }`}
+                          >
+                            {cnt} Chains
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className={`block text-xs font-mono font-bold uppercase mb-1 ${textMuted}`}>
+                        4. Sonification Algorithm
+                      </label>
+                      <select
+                        value={customAlgo}
+                        onChange={(e) => setCustomAlgo(e.target.value as SonifyAlgorithm)}
+                        className={`w-full rounded-lg border px-3 py-2 text-xs font-mono font-semibold focus:outline-none focus:border-[#FF5500] ${
+                          isLight
+                            ? 'bg-slate-50 border-slate-300 text-slate-900'
+                            : 'bg-[#0B0F17] border-[#1E293B] text-[#E2E8F0]'
+                        }`}
+                      >
+                        {(Object.entries(ALGORITHM_LABELS) as [SonifyAlgorithm, string][]).map(
+                          ([key, label]) => (
+                            <option key={key} value={key}>
+                              {label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleLaunchCustomFoldGame}
+                  className="w-full py-3 rounded-lg bg-[#FF5500] hover:bg-[#FF6A1A] text-black font-mono text-sm font-bold tracking-wide shadow-md transition-transform active:scale-98"
+                >
+                  🎮 Launch Custom 3D Ribbon Puzzle →
+                </button>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+
+        {/* TAB 3: Merged Docs & About */}
+        {(activeTab === 'docs' || activeTab === 'about') && (
+          <DocsPage onNavigate={() => setActiveTab('game')} />
+        )}
+      </main>
     </div>
   )
 }

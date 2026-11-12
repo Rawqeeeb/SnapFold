@@ -4,21 +4,32 @@ export default {
   theme: {
     extend: {
       colors: {
-        surface: {
-          DEFAULT: '#f5f5f7',
-          card:    '#ffffff',
-          border:  '#e0e0e0',
+        obsidian: {
+          DEFAULT: '#0B0F17',
+          deep: '#06090F',
+          surface: '#111827',
+          elevated: '#161F30',
+        },
+        slate: {
+          hairline: '#1E293B',
+          muted: '#64748B',
+          light: '#94A3B8',
+          alabaster: '#E2E8F0',
+          bright: '#F8FAFC',
         },
         accent: {
-          DEFAULT: '#5b9bd5',
-          hover:   '#4a8bc4',
+          DEFAULT: '#FF5500',
+          hover: '#FF6A1A',
+          dim: '#993300',
+          cyan: '#00F5D4',
         },
-        helix:  '#e88080',
-        sheet:  '#5ab898',
-        coil:   '#7bc8d4',
       },
       fontFamily: {
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Geist Mono', 'SF Mono', 'monospace'],
+      },
+      borderWidth: {
+        hairline: '1px',
       },
     },
   },

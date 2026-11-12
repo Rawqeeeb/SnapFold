@@ -1,29 +1,24 @@
-# Python
-.venv/
-__pycache__/
-*.py[cod]
-*.pyo
-*.egg-info/
-dist/
-build/
-.env
-.env.*
+# Rust build artifacts (keep frontend/src/wasm/pkg committed for zero-config web deploy)
+rust-core/target/
 
 # Node / Frontend
+node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+dist/
+build/
 
-# macOS
+# Environment
+.env
+.env.*
+
+# OS & IDE
 .DS_Store
-
-# IDE
 .vscode/
 .idea/
 
 # Logs
 *.log
 npm-debug.log*
-
-# Misc
 *.local

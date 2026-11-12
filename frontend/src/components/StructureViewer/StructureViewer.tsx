@@ -51,7 +51,7 @@ export const StructureViewer = forwardRef<StructureViewerHandle>(function Struct
         canvas.width = img.width
         canvas.height = img.height
         const ctx = canvas.getContext('2d')!
-        ctx.fillStyle = '#ffffff'
+        ctx.fillStyle = '#0B0F17'
         ctx.fillRect(0, 0, canvas.width, canvas.height)
         ctx.drawImage(img, 0, 0)
         canvas.toBlob((blob) => { if (blob) downloadBlob(blob, 'structure.jpg') }, 'image/jpeg', 0.92)
@@ -72,10 +72,9 @@ export const StructureViewer = forwardRef<StructureViewerHandle>(function Struct
   useEffect(() => {
     if (!containerRef.current || !window.$3Dmol) return
 
-    // Create viewer once
     if (!viewerRef.current) {
       viewerRef.current = window.$3Dmol.createViewer(containerRef.current, {
-        backgroundColor: 'white',
+        backgroundColor: '#0B0F17',
       })
     }
 
@@ -93,28 +92,29 @@ export const StructureViewer = forwardRef<StructureViewerHandle>(function Struct
     viewer.render()
   }, [pdb])
 
-  // Highlight residue during playback
+  // Highlight residue during playback in Accent Color #FF5500
   useEffect(() => {
     if (!viewerRef.current || !pdb || currentResidue < 0) return
     const viewer = viewerRef.current
     const resi = currentResidue + 1
-    viewer.setStyle({}, { cartoon: { color: 'spectrum', opacity: 0.5 } })
+    viewer.setStyle({}, { cartoon: { color: 'spectrum', opacity: 0.4 } })
     viewer.setStyle(
       { resi },
-      { cartoon: { color: 'spectrum' }, sphere: { radius: 0.5, color: '#ffffff' } },
+      { cartoon: { color: 'spectrum' }, sphere: { radius: 0.6, color: '#FF5500' } },
     )
     viewer.render()
   }, [currentResidue, pdb])
 
   return (
-    <div className="relative w-full rounded-lg overflow-hidden border border-[#e0e0e0]"
-         style={{ height: '460px' }}>
+    <div
+      className="relative w-full rounded overflow-hidden border border-[#1E293B] bg-[#0B0F17]"
+      style={{ height: '420px' }}
+    >
       {!pdb && (
-        <div className="absolute inset-0 flex items-center justify-center text-[#bbb] text-sm z-10 pointer-events-none">
-          3D structure will appear here after prediction
+        <div className="absolute inset-0 flex items-center justify-center text-[#64748B] text-xs font-mono z-10 pointer-events-none">
+          3D atomic model will render here upon structure prediction
         </div>
       )}
-      {/* absolute inset-0 ensures 3Dmol canvas receives explicit pixel dimensions */}
       <div ref={containerRef} className="absolute inset-0" />
     </div>
   )
