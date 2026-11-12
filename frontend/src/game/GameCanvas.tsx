@@ -8,6 +8,8 @@ import { useGameStore } from '../store/gameStore'
 export interface GameCanvasHandle {
   getCanvas: () => HTMLCanvasElement | null
   fitView: () => void
+  zoomIn: () => void
+  zoomOut: () => void
 }
 
 interface GameCanvasProps {
@@ -30,23 +32,23 @@ function createSubunitRibbonMesh(
 
   const pts = blocks.map((b) => new THREE.Vector3(b.position[0], b.position[1], b.position[2]))
   const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5)
-  const segments = Math.max(36, blocks.length * 5)
+  const segments = Math.max(40, blocks.length * 6)
 
-  // Main ribbon tube
-  const tubeGeo = new THREE.TubeGeometry(curve, segments, isGhost ? 0.52 : 0.72, 10, false)
+  // Substantial ribbon tube
+  const tubeGeo = new THREE.TubeGeometry(curve, segments, isGhost ? 0.72 : 1.05, 12, false)
   const posAttr = tubeGeo.attributes.position
   const centerPt = new THREE.Vector3()
   const vPos = new THREE.Vector3()
   for (let i = 0; i < posAttr.count; i++) {
-    const ringIdx = Math.floor(i / 11)
+    const ringIdx = Math.floor(i / 13)
     const u = Math.min(1, ringIdx / segments)
     curve.getPointAt(u, centerPt)
     vPos.fromBufferAttribute(posAttr, i)
     const resIdx = Math.min(blocks.length - 1, Math.floor(u * blocks.length))
     const ss = blocks[resIdx]?.secondary_structure || 'H'
     if (ss === 'H' || ss === 'E') {
-      vPos.z = centerPt.z + (vPos.z - centerPt.z) * 0.45
-      vPos.x = centerPt.x + (vPos.x - centerPt.x) * 1.35
+      vPos.z = centerPt.z + (vPos.z - centerPt.z) * 0.42
+      vPos.x = centerPt.x + (vPos.x - centerPt.x) * 1.38
       posAttr.setXYZ(i, vPos.x, vPos.y, vPos.z)
     }
   }
@@ -57,12 +59,12 @@ function createSubunitRibbonMesh(
         color: baseColor,
         wireframe: true,
         transparent: true,
-        opacity: 0.25,
+        opacity: 0.28,
       })
     : new THREE.MeshStandardMaterial({
         color: baseColor,
-        roughness: 0.25,
-        metalness: 0.15,
+        roughness: 0.22,
+        metalness: 0.18,
       })
 
   const ribbonMesh = new THREE.Mesh(tubeGeo, mat)
@@ -70,16 +72,16 @@ function createSubunitRibbonMesh(
   group.add(ribbonMesh)
 
   if (!isGhost) {
-    const nodeGeo = new THREE.SphereGeometry(0.62, 12, 12)
+    const nodeGeo = new THREE.SphereGeometry(0.8, 14, 14)
     blocks.forEach((b, idx) => {
       const nodeMat = new THREE.MeshStandardMaterial({
         color: baseColor,
-        roughness: 0.25,
-        metalness: 0.15,
+        roughness: 0.22,
+        metalness: 0.18,
       })
       const node = new THREE.Mesh(nodeGeo, nodeMat)
       node.position.set(b.position[0], b.position[1], b.position[2])
-      const s = idx === 0 || idx === blocks.length - 1 ? 1.2 : 0.75
+      const s = idx === 0 || idx === blocks.length - 1 ? 1.35 : 0.85
       node.scale.set(s, s, s)
       node.userData = {
         subunitId: subunitIdx,
@@ -119,7 +121,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
     isPlayingSymphony,
   } = useGameStore()
 
-  // Compute bounding sphere of the protein & subunits so it always fits inside the screen with breathing room
+  // Compute camera distance focused cleanly on the protein complex with prominent size
   const fitCameraToScene = useCallback(
     (solvedMode = false) => {
       const camera = cameraRef.current
@@ -130,14 +132,13 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
 
       level.subunits.forEach((sub) => {
         const [cx, cy, cz] = sub.targetCentroid
-        const [ox, oy, oz] = solvedMode ? [0, 0, 0] : sub.initialOffset
-
         sub.blocks.forEach((b) => {
           const [bx, by, bz] = b.position
-          // Include target ghost position
           box.expandByPoint(new THREE.Vector3(cx + bx, cy + by, cz + bz))
-          // Include initial scrambled position so nothing is clipped off-screen
-          box.expandByPoint(new THREE.Vector3(cx + ox + bx, cy + oy + by, cz + oz + bz))
+          if (!solvedMode) {
+            const [ox, oy, oz] = sub.initialOffset
+            box.expandByPoint(new THREE.Vector3(cx + ox * 0.7 + bx, cy + oy * 0.7 + by, cz + oz * 0.7 + bz))
+          }
         })
       })
 
@@ -147,17 +148,17 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
       box.getBoundingSphere(sphere)
 
       const vFov = (camera.fov * Math.PI) / 180
-      const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(0.55, camera.aspect))
+      const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(0.6, camera.aspect))
       const minFov = Math.min(vFov, hFov)
 
-      // Add 48% padding around the bounding sphere so there is always comfortable space around the protein
-      const radius = Math.max(12, sphere.radius)
-      const distance = (radius / Math.sin(minFov / 2)) * (solvedMode ? 1.32 : 1.48)
+      // Bring camera close so protein fills the screen prominently
+      const radius = Math.max(9, sphere.radius)
+      const distance = (radius / Math.sin(minFov / 2)) * (solvedMode ? 0.95 : 1.08)
 
       controls.target.copy(sphere.center)
       camera.position.set(
         sphere.center.x,
-        sphere.center.y + distance * 0.24,
+        sphere.center.y + distance * 0.22,
         sphere.center.z + distance,
       )
       camera.updateProjectionMatrix()
@@ -166,9 +167,25 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
     [level],
   )
 
+  const handleZoom = useCallback((factor: number) => {
+    const camera = cameraRef.current
+    const controls = controlsRef.current
+    if (!camera || !controls) return
+
+    const offset = new THREE.Vector3().subVectors(camera.position, controls.target)
+    offset.multiplyScalar(factor)
+    // Clamp zoom distance between 8 and 180
+    if (offset.length() < 8) offset.setLength(8)
+    if (offset.length() > 180) offset.setLength(180)
+    camera.position.addVectors(controls.target, offset)
+    controls.update()
+  }, [])
+
   useImperativeHandle(ref, () => ({
     getCanvas: () => rendererRef.current?.domElement ?? null,
     fitView: () => fitCameraToScene(isLevelSolved),
+    zoomIn: () => handleZoom(0.8),
+    zoomOut: () => handleZoom(1.25),
   }))
 
   useEffect(() => {
@@ -182,8 +199,8 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
     const width = container.clientWidth || 800
     const height = container.clientHeight || 520
 
-    const camera = new THREE.PerspectiveCamera(44, width / height, 0.1, 1000)
-    camera.position.set(0, 16, 48)
+    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 1000)
+    camera.position.set(0, 14, 40)
     cameraRef.current = camera
 
     const renderer = new THREE.WebGLRenderer({
@@ -200,31 +217,31 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
     controls.enableDamping = true
     controls.dampingFactor = 0.08
     controls.maxDistance = 180
-    controls.minDistance = 12
-    controls.autoRotateSpeed = 2.0
+    controls.minDistance = 8
+    controls.autoRotateSpeed = 1.8
     controlsRef.current = controls
 
-    scene.add(new THREE.AmbientLight(0xffffff, 1.05))
-    const dLight1 = new THREE.DirectionalLight(0xffffff, 1.25)
+    scene.add(new THREE.AmbientLight(0xffffff, 1.1))
+    const dLight1 = new THREE.DirectionalLight(0xffffff, 1.3)
     dLight1.position.set(30, 40, 30)
     scene.add(dLight1)
-    const dLight2 = new THREE.DirectionalLight(0x94a3b8, 0.75)
+    const dLight2 = new THREE.DirectionalLight(0x94a3b8, 0.8)
     dLight2.position.set(-30, -25, -20)
     scene.add(dLight2)
 
-    // Create 3D Musical Note Beacon (glowing core + outer halo ring + point light)
+    // Musical Note Beacon
     const beaconGroup = new THREE.Group()
     beaconGroup.visible = false
 
     const coreSphere = new THREE.Mesh(
-      new THREE.SphereGeometry(1.45, 20, 20),
+      new THREE.SphereGeometry(1.6, 20, 20),
       new THREE.MeshBasicMaterial({ color: 0xff5500 }),
     )
     const haloRing = new THREE.Mesh(
-      new THREE.TorusGeometry(2.3, 0.22, 12, 32),
+      new THREE.TorusGeometry(2.5, 0.25, 12, 32),
       new THREE.MeshBasicMaterial({ color: 0x00f5d4, transparent: true, opacity: 0.9 }),
     )
-    const noteLight = new THREE.PointLight(0xff5500, 4.5, 18)
+    const noteLight = new THREE.PointLight(0xff5500, 5.0, 22)
     beaconGroup.add(coreSphere, haloRing, noteLight)
     scene.add(beaconGroup)
     beaconGroupRef.current = beaconGroup
@@ -299,14 +316,12 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
     }
   }, [onSelectSubunit])
 
-  // Update background on theme change
   useEffect(() => {
     if (sceneRef.current) {
       sceneRef.current.background = new THREE.Color(theme === 'light' ? 0xf8fafc : 0x0b0f17)
     }
   }, [theme])
 
-  // Auto-orbit camera and re-frame nicely when solved
   useEffect(() => {
     if (controlsRef.current) {
       controlsRef.current.autoRotate = isLevelSolved || isPlayingSymphony
@@ -316,7 +331,6 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
     }
   }, [isLevelSolved, isPlayingSymphony, fitCameraToScene])
 
-  // Build subunit ribbon meshes and fit camera to screen when level changes
   useEffect(() => {
     const scene = sceneRef.current
     if (!scene) return
@@ -352,11 +366,9 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
     })
     subunitGroupsRef.current = groups
 
-    // Fit camera so the entire protein & scrambled subunits fit comfortably with space around them
     fitCameraToScene(false)
   }, [level, theme, fitCameraToScene])
 
-  // Update subunit positions & rotations
   useEffect(() => {
     subunitGroupsRef.current.forEach((group, idx) => {
       const sub = level.subunits[idx]
@@ -386,7 +398,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
             c.material.emissiveIntensity = 0.22
           } else if (isActive) {
             c.material.emissive.setHex(0xff5500)
-            c.material.emissiveIntensity = 0.14
+            c.material.emissiveIntensity = 0.16
           } else {
             c.material.emissive.setHex(0x000000)
             c.material.emissiveIntensity = 0
@@ -396,7 +408,6 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
     })
   }, [transforms, activeSubunitIdx, level])
 
-  // Highlight active playing residue & move 3D Note Beacon along the protein structure
   useEffect(() => {
     const beacon = beaconGroupRef.current
     let foundActiveMesh: THREE.Mesh | null = null
@@ -414,15 +425,15 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
       if (mesh.material instanceof THREE.MeshStandardMaterial) {
         if (isExact) {
           mesh.material.emissive.setHex(0xff5500)
-          mesh.material.emissiveIntensity = 1.8
-          mesh.scale.set(2.4, 2.4, 2.4)
+          mesh.material.emissiveIntensity = 2.0
+          mesh.scale.set(2.5, 2.5, 2.5)
           foundActiveMesh = mesh
         } else if (isNeighbor) {
           mesh.material.emissive.setHex(0x00f5d4)
-          mesh.material.emissiveIntensity = 0.9
+          mesh.material.emissiveIntensity = 1.0
           mesh.scale.set(1.5, 1.5, 1.5)
         } else {
-          mesh.scale.set(0.75, 0.75, 0.75)
+          mesh.scale.set(0.85, 0.85, 0.85)
           mesh.material.emissive.setHex(0x000000)
           mesh.material.emissiveIntensity = 0
         }
@@ -441,7 +452,6 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
     }
   }, [activePlayingSubunit, activePlayingResidue])
 
-  // Render directional hint arrow / rotation arc
   useEffect(() => {
     const scene = sceneRef.current
     if (!scene) return
@@ -460,14 +470,14 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
     const accent = new THREE.Color(0xff5500)
 
     if (hint.action.startsWith('Rotate')) {
-      const curve = new THREE.ArcCurve(0, 0, 7.5, 0, Math.PI * 0.75 * hint.direction, false)
+      const curve = new THREE.ArcCurve(0, 0, 8.5, 0, Math.PI * 0.75 * hint.direction, false)
       const pts = curve.getPoints(28).map((p) => new THREE.Vector3(p.x, p.y, 0))
       const line = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints(pts),
         new THREE.LineBasicMaterial({ color: accent, linewidth: 3 }),
       )
       const cone = new THREE.Mesh(
-        new THREE.ConeGeometry(0.8, 1.8, 12),
+        new THREE.ConeGeometry(0.9, 2.0, 12),
         new THREE.MeshBasicMaterial({ color: accent }),
       )
       const endPt = pts[pts.length - 1]
@@ -485,29 +495,47 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
         hint.action === 'SlideDown' ? -1 : hint.action === 'SlideUp' ? 1 : 0,
         hint.action === 'SlideBack' ? -1 : hint.action === 'SlideForward' ? 1 : 0,
       ).normalize()
-      holder.add(new THREE.ArrowHelper(dir, new THREE.Vector3(0, 0, 0), 9.5, 0xff5500, 2.4, 1.4))
+      holder.add(new THREE.ArrowHelper(dir, new THREE.Vector3(0, 0, 0), 10.5, 0xff5500, 2.6, 1.5))
     }
 
     scene.add(holder)
     hintMeshRef.current = holder
   }, [showHint, hint, activeSubunitIdx])
 
+  const btnStyle =
+    theme === 'light'
+      ? 'bg-white/95 border-slate-300 text-slate-800 hover:bg-slate-100 hover:border-[#EA580C]'
+      : 'bg-[#111827]/95 border-[#1E293B] text-[#E2E8F0] hover:bg-[#1E293B] hover:border-[#FF5500]'
+
   return (
     <div className="relative w-full h-full select-none overflow-hidden touch-none">
       <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
-      {/* Re-center / Fit View Button */}
-      <button
-        onClick={() => fitCameraToScene(isLevelSolved)}
-        className={`absolute bottom-3 right-3 px-2.5 py-1.5 rounded-lg border text-[11px] font-mono font-semibold shadow-sm transition-colors ${
-          theme === 'light'
-            ? 'bg-white/95 border-slate-300 text-slate-800 hover:border-[#EA580C]'
-            : 'bg-[#111827]/95 border-[#1E293B] text-[#E2E8F0] hover:border-[#FF5500]'
-        }`}
-        title="Fit entire protein to screen"
-      >
-        ⊡ Fit to Screen
-      </button>
+      {/* Floating Zoom & Fit Controls (Tactile and accessible) */}
+      <div className="absolute bottom-3 right-3 flex items-center gap-1.5 z-10">
+        <button
+          onClick={() => handleZoom(0.8)}
+          className={`w-8 h-8 rounded-lg border font-mono font-bold text-sm shadow-md flex items-center justify-center transition-colors ${btnStyle}`}
+          title="Zoom in (+)"
+        >
+          +
+        </button>
+        <button
+          onClick={() => handleZoom(1.25)}
+          className={`w-8 h-8 rounded-lg border font-mono font-bold text-sm shadow-md flex items-center justify-center transition-colors ${btnStyle}`}
+          title="Zoom out (-)"
+        >
+          −
+        </button>
+        <button
+          onClick={() => fitCameraToScene(isLevelSolved)}
+          className={`px-2.5 h-8 rounded-lg border text-xs font-mono font-semibold shadow-md flex items-center gap-1 transition-colors ${btnStyle}`}
+          title="Fit protein to screen"
+        >
+          <span>⊡</span>
+          <span className="hidden sm:inline">Fit</span>
+        </button>
+      </div>
 
       {isLevelSolved && (
         <div className="absolute inset-0 pointer-events-none border-2 border-emerald-500/80 rounded" />

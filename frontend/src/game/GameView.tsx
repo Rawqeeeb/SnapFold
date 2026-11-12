@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { CAMPAIGN_LEVELS } from './levels'
+import { CAMPAIGN_LEVELS, createSubunitNotes } from './levels'
 import { GameCanvas, type GameCanvasHandle } from './GameCanvas'
 import {
   createDockingEngine,
@@ -16,8 +16,21 @@ import {
   getAudioRecordingStream,
   type TraversalNoteStep,
 } from '../components/Sonification/AudioEngine'
-import { STYLE_PRESETS } from '../components/Sonification/StyleEngine'
-import { ALGORITHM_LABELS } from '../components/Sonification/AlgorithmEngine'
+import { STYLE_PRESETS, type MusicalStyle } from '../components/Sonification/StyleEngine'
+import { ALGORITHM_LABELS, type SonifyAlgorithm } from '../components/Sonification/AlgorithmEngine'
+
+const GENRE_LABELS: Record<MusicalStyle, string> = {
+  Classical: 'Classical Piano',
+  Jazz: 'Jazz (Swing)',
+  Punk: 'Rock / Punk',
+  Ambient: 'Ambient (Warm)',
+  'Lo-Fi': 'Lo-Fi Chill',
+  Synthwave: 'Synthwave 80s',
+  Techno: 'Techno Beat',
+  Afrobeat: 'Afrobeat Percussive',
+  Folk: 'Folk Acoustic',
+  Default: 'Standard Synth',
+}
 
 export function GameView() {
   const {
@@ -34,6 +47,8 @@ export function GameView() {
     hint,
     showHint,
     showLevelClearModal,
+    selectedAlgorithm,
+    selectedStyle,
     hintsUsed,
     snapsUsed,
     movesCount,
@@ -54,6 +69,8 @@ export function GameView() {
     setPlayingSymphony,
     setActivePlayingResidue,
     setShowLevelClearModal,
+    setSelectedAlgorithm,
+    setSelectedStyle,
     setActiveTab,
   } = useGameStore()
 
@@ -63,6 +80,9 @@ export function GameView() {
       ? customLevel
       : CAMPAIGN_LEVELS.find((l) => l.id === currentLevelId) || CAMPAIGN_LEVELS[0]
 
+  const effectiveAlgo = selectedAlgorithm || activeLevel.algorithm || 'Fantaisie-Impromptu'
+  const effectiveStyle = selectedStyle || 'Classical'
+
   const engineRef = useRef<IDockingEngine | null>(null)
   const gameCanvasRef = useRef<GameCanvasHandle>(null)
   const [transforms, setTransforms] = useState<SubunitTransformData[]>([])
@@ -71,6 +91,7 @@ export function GameView() {
   const [traversalStep, setTraversalStep] = useState<TraversalNoteStep | null>(null)
   const [isRecordingVideo, setIsRecordingVideo] = useState(false)
   const [recordingProgress, setRecordingProgress] = useState(0)
+  const [mobileControlTab, setMobileControlTab] = useState<'move' | 'rotate'>('move')
   const traversalStepRef = useRef<TraversalNoteStep | null>(null)
 
   // Compute individual subunit alignment score (0.0 -> 1.0)
@@ -86,9 +107,9 @@ export function GameView() {
     return posScore * 0.55 + rotScore * 0.45
   }, [])
 
-  // Play the full 3D Protein Traversal Symphony across all subunits
+  // Play the clean, relaxed 3D Protein Traversal Symphony
   const triggerSolvedTraversal = useCallback(
-    async (lvl = activeLevel) => {
+    async (lvl = activeLevel, algo = effectiveAlgo, style = effectiveStyle) => {
       setPlayingSymphony(true)
       await scheduleProteinTraversal(
         lvl,
@@ -101,10 +122,11 @@ export function GameView() {
           setPlayingSymphony(false)
           setActivePlayingResidue(null, null)
         },
-        0.15,
+        algo,
+        style,
       )
     },
-    [activeLevel, setPlayingSymphony, setActivePlayingResidue],
+    [activeLevel, effectiveAlgo, effectiveStyle, setPlayingSymphony, setActivePlayingResidue],
   )
 
   // Initialize Docking Engine when level changes
@@ -255,7 +277,7 @@ export function GameView() {
     gameCanvasRef.current?.fitView()
   }, [resetCurrentLevelStats, setSolved, setShowHint, setShowLevelClearModal, setAlignmentScore])
 
-  // Solo Subunit Tune Playback
+  // Solo Subunit Tune Playback using active algorithm and style
   const handlePlaySoloSubunit = useCallback(
     async (subIdx: number) => {
       setActiveSubunitIdx(subIdx)
@@ -269,12 +291,13 @@ export function GameView() {
       if (!sub) return
 
       setPlayingSolo(true, subIdx)
-      const defaultPreset = STYLE_PRESETS['Default']
+      const preset = STYLE_PRESETS[effectiveStyle] || STYLE_PRESETS['Classical']
+      const notes = createSubunitNotes(sub.sequence, effectiveAlgo, subIdx * 40)
       const subScore = getSubunitScore(transforms[subIdx])
       await scheduleSonification(
-        sub.notes,
-        125,
-        defaultPreset,
+        notes,
+        preset.defaultBpm || 115,
+        preset,
         (resIdx) => {
           setActivePlayingResidue(subIdx, resIdx)
         },
@@ -286,6 +309,8 @@ export function GameView() {
       activeSubunitIdx,
       isPlayingSolo,
       transforms,
+      effectiveAlgo,
+      effectiveStyle,
       getSubunitScore,
       setActiveSubunitIdx,
       setPlayingSolo,
@@ -390,7 +415,6 @@ export function GameView() {
   ])
 
   const pct = Math.round(alignmentScore * 100)
-  const activeSubunit = activeLevel.subunits[activeSubunitIdx] || activeLevel.subunits[0]
   const activeTransform = transforms[activeSubunitIdx]
   const activeSubunitScore = getSubunitScore(activeTransform)
   const activeSubunitPct = Math.round(activeSubunitScore * 100)
@@ -398,7 +422,7 @@ export function GameView() {
 
   // Wordle / Strands Shareable Scorecard Text
   const emojiSummary = (emojiTrail.length > 0 ? emojiTrail.slice(-14).join('') : '🟦🟦🟩') + '🧬🎵'
-  const shareText = `SnapFold #${activeLevel.levelNumber}: ${activeLevel.title} 🧬\nSolved in ${movesCount} moves · 💡 ${hintsUsed} hints · 🧲 ${snapsUsed} snaps\n${emojiSummary}\nPlay at SnapFold!`
+  const shareText = `SnapFold #${activeLevel.levelNumber}: ${activeLevel.title} 🧬\nSolved in ${movesCount} moves · 💡 ${hintsUsed} hints · 🧲 ${snapsUsed} snaps\n${emojiSummary}\nPlay at https://github.com/Rawqeeeb/SnapFold`
 
   const handleCopyScorecard = () => {
     navigator.clipboard?.writeText(shareText)
@@ -472,7 +496,7 @@ export function GameView() {
     ctx.fillStyle = isLight ? '#334155' : '#94A3B8'
     ctx.font = '14px "JetBrains Mono", monospace'
     ctx.fillText(
-      `Sonification: ${ALGORITHM_LABELS[activeLevel.algorithm]} · Key of ${activeLevel.musicalKey}`,
+      `Sonification: ${ALGORITHM_LABELS[effectiveAlgo]} · Style: ${GENRE_LABELS[effectiveStyle]}`,
       42,
       405,
     )
@@ -486,7 +510,7 @@ export function GameView() {
     document.body.removeChild(a)
   }
 
-  // Record & Download 3D Protein Symphony Video (.webm / .mp4)
+  // Record & Download 3D Symphony Video WITHOUT ANY CLUTTER OR CARDS OBSCURING THE PROTEIN
   const handleDownloadSymphonyVideo = async () => {
     const glCanvas = gameCanvasRef.current?.getCanvas()
     if (!glCanvas || isRecordingVideo) return
@@ -506,58 +530,36 @@ export function GameView() {
     let animActive = true
     const renderCompositeFrame = () => {
       if (!animActive) return
+      // Draw background
       ctx.fillStyle = isLight ? '#F8FAFC' : '#0B0F17'
       ctx.fillRect(0, 0, compCanvas.width, compCanvas.height)
 
+      // Draw 100% unobstructed 3D Canvas
       ctx.drawImage(glCanvas, 0, 0, compCanvas.width, compCanvas.height)
 
-      ctx.fillStyle = isLight ? 'rgba(255, 255, 255, 0.94)' : 'rgba(11, 15, 23, 0.9)'
-      ctx.fillRect(0, 0, compCanvas.width, 54)
-      ctx.fillStyle = '#FF5500'
-      ctx.fillRect(16, 12, 30, 30)
-      ctx.fillStyle = '#000000'
-      ctx.font = 'bold 15px "JetBrains Mono", monospace'
-      ctx.fillText('SF', 22, 32)
-
-      ctx.fillStyle = isLight ? '#0F172A' : '#E2E8F0'
-      ctx.font = 'bold 16px "JetBrains Mono", monospace'
-      ctx.fillText(
-        `SnapFold · Level ${activeLevel.levelNumber}: ${activeLevel.title} (${activeLevel.pdbCode})`,
-        56,
-        32,
-      )
-
-      ctx.fillStyle = '#0369A1'
-      ctx.font = 'bold 13px "JetBrains Mono", monospace'
-      ctx.fillText(
-        `Score: ${movesCount} moves · 💡 ${hintsUsed} · 🧲 ${snapsUsed}`,
-        compCanvas.width - 285,
-        32,
-      )
+      // Only a sleek, minimal, translucent 32px footer strip at the very bottom edge so the protein is 100% visible
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.78)'
+      ctx.fillRect(0, compCanvas.height - 34, compCanvas.width, 34)
 
       const st = traversalStepRef.current
-      ctx.fillStyle = isLight ? 'rgba(255, 255, 255, 0.94)' : 'rgba(11, 15, 23, 0.92)'
-      ctx.fillRect(0, compCanvas.height - 62, compCanvas.width, 62)
-
       if (st) {
-        const progressRatio = st.globalStep / Math.max(1, st.totalSteps)
         ctx.fillStyle = '#FF5500'
-        ctx.fillRect(0, compCanvas.height - 62, compCanvas.width * progressRatio, 4)
+        ctx.fillRect(0, compCanvas.height - 34, compCanvas.width * (st.globalStep / Math.max(1, st.totalSteps)), 2.5)
 
-        ctx.fillStyle = isLight ? '#C2410C' : '#FF5500'
-        ctx.font = 'bold 16px "JetBrains Mono", monospace'
+        ctx.fillStyle = '#FFFFFF'
+        ctx.font = 'bold 13px "JetBrains Mono", monospace'
         ctx.fillText(
-          `♪ Playing Note ${st.noteName} — ${st.chainName} · Residue #${st.residueIndex} (${st.aminoAcid})`,
-          20,
-          compCanvas.height - 26,
+          `SnapFold: ${activeLevel.title} · Note ${st.noteName} (${st.chainName}) · Residue #${st.residueIndex} (${st.aminoAcid})`,
+          16,
+          compCanvas.height - 12,
         )
 
-        ctx.fillStyle = isLight ? '#334155' : '#94A3B8'
-        ctx.font = '13px "JetBrains Mono", monospace'
+        ctx.fillStyle = '#94A3B8'
+        ctx.font = '12px "JetBrains Mono", monospace'
         ctx.fillText(
-          `Residue ${st.globalStep} / ${st.totalSteps} · ${activeLevel.algorithm}`,
-          compCanvas.width - 270,
-          compCanvas.height - 26,
+          `${st.globalStep}/${st.totalSteps} · ${GENRE_LABELS[effectiveStyle]}`,
+          compCanvas.width - 200,
+          compCanvas.height - 12,
         )
       }
 
@@ -626,7 +628,8 @@ export function GameView() {
           if (recorder.state !== 'inactive') recorder.stop()
         }, 350)
       },
-      0.14,
+      effectiveAlgo,
+      effectiveStyle,
     )
   }
 
@@ -640,28 +643,28 @@ export function GameView() {
     return false
   }
 
-  // High-Contrast Light & Dark Mode Tokens
+  // Design System Color Tokens (High contrast, readable everywhere)
   const panelClass = isLight
-    ? 'bg-white border-slate-300 text-slate-900'
+    ? 'bg-white border-slate-200 text-slate-900 shadow-sm'
     : 'bg-[#0B0F17] border-[#1E293B] text-[#E2E8F0]'
   const subCardBase = isLight
-    ? 'bg-slate-50 border-slate-300 text-slate-900'
+    ? 'bg-slate-50 border-slate-200 text-slate-900'
     : 'bg-[#111827] border-[#1E293B] text-[#E2E8F0]'
   const btnClass = isLight
-    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-900 font-semibold shadow-sm'
+    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-900 font-semibold shadow-xs'
     : 'bg-[#111827] hover:bg-[#1E293B] border-[#1E293B] text-[#E2E8F0] font-semibold'
-  const mutedText = isLight ? 'text-slate-700' : 'text-[#94A3B8]'
-  const orangeText = isLight ? 'text-orange-700' : 'text-[#FF5500]'
+  const mutedText = isLight ? 'text-slate-600' : 'text-[#94A3B8]'
+  const orangeText = isLight ? 'text-orange-600' : 'text-[#FF5500]'
   const blueText = isLight ? 'text-sky-700' : 'text-[#00F5D4]'
   const greenText = isLight ? 'text-emerald-700' : 'text-emerald-400'
 
   return (
     <div className="relative w-full h-[calc(100dvh-3.5rem)] flex flex-col overflow-hidden">
-      {/* ── 1. Top Level & Overall Progress Bar ───────────────────────────── */}
+      {/* ── 1. Top Level & Overall Progress Bar (No Wikipedia during game!) ── */}
       <div
-        className={`shrink-0 border-b px-2.5 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 ${panelClass}`}
+        className={`shrink-0 border-b px-2.5 sm:px-4 py-2 flex items-center justify-between gap-2 ${panelClass}`}
       >
-        {/* Level Selector Pills */}
+        {/* Left: Compact Level Selector */}
         <div className="flex items-center gap-1 overflow-x-auto max-w-full pb-0.5 sm:pb-0 no-scrollbar">
           {CAMPAIGN_LEVELS.map((lvl) => {
             const isUnlocked =
@@ -677,20 +680,20 @@ export function GameView() {
                 key={lvl.id}
                 disabled={!isUnlocked}
                 onClick={() => selectLevel(lvl.id)}
-                className={`px-2.5 py-1 text-xs font-mono rounded border transition-all shrink-0 ${
+                className={`w-7 h-7 sm:w-8 sm:h-8 text-xs font-mono rounded-lg border transition-all shrink-0 flex items-center justify-center font-bold ${
                   isCurrent
-                    ? 'bg-[#FF5500] text-black border-[#FF5500] font-bold shadow-sm'
+                    ? 'bg-[#FF5500] text-black border-[#FF5500] shadow-sm'
                     : isCleared
                       ? isLight
-                        ? 'bg-emerald-100 text-emerald-800 border-emerald-400 font-bold'
-                        : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-bold'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-400'
+                        : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                       : isUnlocked
                         ? btnClass
                         : isLight
                           ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
                           : 'opacity-35 cursor-not-allowed border-transparent text-slate-500'
                 }`}
-                title={`Level ${lvl.id}: ${lvl.title} (${lvl.difficulty})`}
+                title={`Level ${lvl.id}: ${lvl.title}`}
               >
                 {lvl.id}
                 {isCleared ? '✓' : ''}
@@ -700,88 +703,59 @@ export function GameView() {
           {customLevel && (
             <button
               onClick={() => selectLevel(99)}
-              className={`px-2.5 py-1 text-xs font-mono rounded border shrink-0 ${
+              className={`px-2 h-7 sm:h-8 text-xs font-mono rounded-lg border font-bold shrink-0 ${
                 currentLevelId === 99
-                  ? 'bg-[#FF5500] text-black border-[#FF5500] font-bold'
-                  : 'border-sky-600 text-sky-700 font-semibold'
+                  ? 'bg-[#FF5500] text-black border-[#FF5500]'
+                  : 'border-sky-600 text-sky-700'
               }`}
             >
-              🧬 Custom
+              Custom
             </button>
           )}
         </div>
 
-        {/* Center Info: Protein Title + Wikipedia Link */}
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* Center: Protein Level Name (Clean, no Wikipedia button while playing) */}
+        <div className="hidden sm:flex items-center gap-2">
           <span
-            className={`text-[11px] font-mono uppercase px-2 py-0.5 rounded font-bold ${
+            className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-bold ${
               activeLevel.difficulty === 'Easy'
-                ? isLight
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-emerald-500/20 text-emerald-300'
+                ? isLight ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-500/20 text-emerald-300'
                 : activeLevel.difficulty === 'Medium'
-                  ? isLight
-                    ? 'bg-amber-100 text-amber-800'
-                    : 'bg-amber-500/20 text-amber-300'
-                  : isLight
-                    ? 'bg-rose-100 text-rose-800'
-                    : 'bg-rose-500/20 text-rose-300'
+                  ? isLight ? 'bg-amber-100 text-amber-800' : 'bg-amber-500/20 text-amber-300'
+                  : isLight ? 'bg-rose-100 text-rose-800' : 'bg-rose-500/20 text-rose-300'
             }`}
           >
             {activeLevel.difficulty}
           </span>
-          <span className="text-xs sm:text-sm font-mono font-bold truncate max-w-[180px] sm:max-w-none">
-            Level {activeLevel.levelNumber}: {activeLevel.title}
+          <span className="text-xs sm:text-sm font-mono font-bold truncate max-w-[200px] lg:max-w-none">
+            {activeLevel.title}
           </span>
-          <a
-            href={activeLevel.wikipediaUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`text-xs font-mono px-2.5 py-0.5 rounded border font-semibold transition-colors flex items-center gap-1 ${
-              isLight
-                ? 'border-sky-600 bg-sky-50 text-sky-800 hover:bg-sky-600 hover:text-white'
-                : 'border-[#00F5D4]/50 bg-[#00F5D4]/10 text-[#00F5D4] hover:bg-[#00F5D4] hover:text-black'
-            }`}
-            title={`Learn more about ${activeLevel.title} on Wikipedia`}
-          >
-            <span>📖 Wikipedia ↗</span>
-          </a>
         </div>
 
-        {/* Right: Overall Total Alignment Score */}
-        <div className="flex items-center gap-2.5 ml-auto sm:ml-0">
-          <div className={`hidden md:flex items-center gap-2.5 text-xs font-mono font-semibold ${mutedText}`}>
-            <span>Moves: {movesCount}</span>
-            <span className={orangeText}>💡 {hintsUsed}</span>
-            <span className={blueText}>🧲 {snapsUsed}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`text-[11px] font-mono font-bold uppercase hidden sm:inline ${mutedText}`}>
-              Total:
-            </span>
-            <div className="w-16 sm:w-24 h-2.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden border border-slate-300 dark:border-slate-700">
-              <div
-                className={`h-full transition-all duration-200 ${
-                  pct >= 100 ? 'bg-emerald-600' : pct >= 85 ? 'bg-sky-600' : 'bg-[#FF5500]'
-                }`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            <span
-              className={`text-xs sm:text-sm font-mono font-extrabold tabular-nums ${
-                pct >= 100 ? greenText : pct >= 85 ? blueText : orangeText
+        {/* Right: Alignment Total % */}
+        <div className="flex items-center gap-2">
+          <div className="w-16 sm:w-24 h-2.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden border border-slate-300/80 dark:border-slate-700">
+            <div
+              className={`h-full transition-all duration-200 ${
+                pct >= 100 ? 'bg-emerald-600' : pct >= 85 ? 'bg-sky-600' : 'bg-[#FF5500]'
               }`}
-            >
-              {pct}%
-            </span>
+              style={{ width: `${pct}%` }}
+            />
           </div>
+          <span
+            className={`text-xs sm:text-sm font-mono font-extrabold tabular-nums ${
+              pct >= 100 ? greenText : pct >= 85 ? blueText : orangeText
+            }`}
+          >
+            {pct}%
+          </span>
         </div>
       </div>
 
-      {/* ── 2. Mobile Subunit Selector Strip (Visible on < lg screens) ────── */}
+      {/* ── 2. Mobile Subunit Selector Bar (< lg screens) ────────────────── */}
       <div
-        className={`lg:hidden shrink-0 border-b px-2.5 sm:px-4 py-1.5 flex items-center gap-1.5 overflow-x-auto no-scrollbar ${
-          isLight ? 'bg-slate-100 border-slate-300' : 'bg-[#111827] border-[#1E293B]'
+        className={`lg:hidden shrink-0 border-b px-2.5 py-1.5 flex items-center gap-1.5 overflow-x-auto no-scrollbar ${
+          isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#111827] border-[#1E293B]'
         }`}
       >
         {activeLevel.subunits.map((sub, idx) => {
@@ -791,63 +765,50 @@ export function GameView() {
           const isSoloThis = isPlayingSolo && activeSubunitIdx === idx
 
           return (
-            <div
+            <button
               key={sub.id}
               onClick={() => setActiveSubunitIdx(idx)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-mono cursor-pointer transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-mono shrink-0 transition-all ${
                 isSelected
                   ? isLight
-                    ? 'bg-white border-2 border-[#FF5500] text-slate-900 shadow-sm font-bold'
+                    ? 'bg-white border-2 border-[#FF5500] text-slate-900 shadow-xs font-bold'
                     : 'bg-[#1E293B] border-2 border-[#FF5500] text-[#E2E8F0] font-bold'
                   : `${subCardBase} font-medium`
               }`}
             >
               <span
-                className="w-3 h-3 rounded-full shrink-0 border border-black/20"
+                className="w-2.5 h-2.5 rounded-full shrink-0"
                 style={{ backgroundColor: sub.color }}
               />
-              <span className="truncate max-w-[110px]">{sub.name}</span>
+              <span className="truncate max-w-[90px]">{sub.name}</span>
               <span
-                className={`text-[11px] px-1.5 py-0.5 rounded font-bold ${
+                className={`text-[10px] px-1 rounded font-bold ${
                   subPct >= 100
-                    ? isLight
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-emerald-500/20 text-emerald-300'
+                    ? 'text-emerald-600 font-extrabold'
                     : subPct >= 85
-                      ? isLight
-                        ? 'bg-sky-100 text-sky-800'
-                        : 'bg-sky-500/20 text-sky-300'
-                      : isLight
-                        ? 'bg-slate-200 text-slate-800'
-                        : 'bg-slate-800 text-slate-200'
+                      ? 'text-sky-700 font-bold'
+                      : mutedText
                 }`}
               >
-                {subPct >= 100 ? '✓ 100%' : `${subPct}%`}
+                {subPct >= 100 ? '✓' : `${subPct}%`}
               </span>
-              <button
+              <span
                 onClick={(e) => {
                   e.stopPropagation()
                   handlePlaySoloSubunit(idx)
                 }}
-                className={`ml-0.5 px-1.5 py-0.5 text-[11px] rounded border font-bold transition-colors ${
-                  isSoloThis
-                    ? 'bg-[#FF5500] text-black border-[#FF5500]'
-                    : isLight
-                      ? 'bg-slate-100 border-slate-300 text-slate-800 hover:border-[#FF5500]'
-                      : 'border-slate-600 text-slate-200 hover:border-[#FF5500]'
-                }`}
-                title="Play subunit melody"
+                className="p-0.5 text-[10px] text-orange-600 font-bold"
               >
                 {isSoloThis ? '■' : '♪'}
-              </button>
-            </div>
+              </span>
+            </button>
           )
         })}
       </div>
 
-      {/* ── 3. Main Body: Left 3D Viewport + Right Sidebar on Desktop (Bottom Dock on Mobile) ── */}
+      {/* ── 3. Main Body: 3D Viewport on Left + Sidebar / Dock on Right ────── */}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-        {/* Interactive 3D Ribbon Viewport */}
+        {/* Interactive 3D Viewport */}
         <div className="flex-1 min-h-0 relative">
           {engineReady && (
             <GameCanvas
@@ -860,118 +821,79 @@ export function GameView() {
             />
           )}
 
-          {/* Unsolved Clue & Active Hint Floating Pill */}
+          {/* Unsolved Clue / Hint Floating Pill */}
           {!isLevelSolved && (
-            <div className="absolute top-2.5 left-2.5 right-2.5 sm:right-auto sm:max-w-md pointer-events-none flex flex-col gap-1.5">
-              <div
-                className={`px-3 py-2 rounded-lg border text-xs font-mono shadow-sm ${
-                  isLight
-                    ? 'bg-white/95 border-slate-300 text-slate-900'
-                    : 'bg-[#0B0F17]/95 border-[#1E293B] text-[#E2E8F0]'
-                }`}
-              >
-                <span className={`font-bold mr-1.5 ${orangeText}`}>Goal:</span>
-                <span className="font-medium">{activeLevel.clue}</span>
-              </div>
-
-              {showHint && hint && (
+            <div className="absolute top-2.5 left-2.5 right-2.5 sm:right-auto sm:max-w-md pointer-events-none flex flex-col gap-1.5 z-10">
+              {showHint && hint ? (
                 <div
-                  className={`px-3 py-2 rounded-lg border-2 border-[#FF5500] text-xs font-mono font-bold shadow-md ${
+                  className={`px-3 py-1.5 rounded-lg border-2 border-[#FF5500] text-xs font-mono font-bold shadow-md ${
                     isLight ? 'bg-orange-50 text-orange-900' : 'bg-[#111827] text-[#FF5500]'
                   }`}
                 >
-                  💡 Recommended Move ({activeSubunit?.name}): {hint.description}
+                  💡 Next Step: {hint.description}
+                </div>
+              ) : (
+                <div
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-mono shadow-xs ${
+                    isLight
+                      ? 'bg-white/90 border-slate-300 text-slate-800'
+                      : 'bg-[#0B0F17]/90 border-[#1E293B] text-[#E2E8F0]'
+                  }`}
+                >
+                  <span className={`font-bold mr-1 ${orangeText}`}>Goal:</span>
+                  <span>{activeLevel.clue}</span>
                 </div>
               )}
             </div>
           )}
 
-          {/* Solved 3D Protein Musical Traversal Live HUD Overlay */}
+          {/* Solved HUD: Located at BOTTOM of Viewport so the 3D protein is 100% visible and unblocked! */}
           {isLevelSolved && (
-            <div className="absolute top-3 left-3 right-3 pointer-events-auto flex flex-col gap-2 max-w-2xl mx-auto">
+            <div className="absolute bottom-14 left-3 right-3 pointer-events-auto flex justify-center z-10">
               <div
-                className={`p-3.5 rounded-xl border-2 border-emerald-500 shadow-lg ${
+                className={`p-2.5 px-4 rounded-xl border-2 border-emerald-500 shadow-lg backdrop-blur-md max-w-xl w-full flex items-center justify-between gap-3 ${
                   isLight ? 'bg-white/95 text-slate-900' : 'bg-[#0B0F17]/95 text-[#E2E8F0]'
                 }`}
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`px-2 py-0.5 rounded font-mono text-xs font-bold ${
-                        isLight
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-emerald-500/20 text-emerald-300'
-                      }`}
-                    >
-                      ✓ 100% DOCKED
-                    </span>
-                    <span className="font-mono font-bold text-xs sm:text-sm">
-                      {activeLevel.title} — 3D Protein Symphony
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => triggerSolvedTraversal(activeLevel)}
-                      className="px-3 py-1 rounded bg-[#FF5500] hover:bg-[#FF6A1A] text-black font-mono text-xs font-bold"
-                    >
-                      {isPlayingSymphony ? '🔊 Restart 3D Music' : '▶ Play 3D Music'}
-                    </button>
-                    <button
-                      onClick={() => setShowLevelClearModal(true)}
-                      className={`px-3 py-1 rounded border font-mono text-xs font-bold ${btnClass}`}
-                    >
-                      🏆 Scorecard
-                    </button>
-                  </div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                  <span className="font-mono font-bold text-xs truncate">
+                    {traversalStep
+                      ? `♪ ${traversalStep.noteName} · ${traversalStep.chainName} · Res #${traversalStep.residueIndex}`
+                      : '✓ 100% Solved — Playing 3D Symphony'}
+                  </span>
                 </div>
 
-                {/* Live Note & Residue Progress across the 3D Structure */}
-                {traversalStep ? (
-                  <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center justify-between text-xs font-mono mb-1">
-                      <span className={`font-bold ${orangeText}`}>
-                        ♪ Note {traversalStep.noteName} · {traversalStep.chainName} · Residue #
-                        {traversalStep.residueIndex} ({traversalStep.aminoAcid})
-                      </span>
-                      <span className={`font-semibold ${mutedText}`}>
-                        {traversalStep.globalStep} / {traversalStep.totalSteps} residues
-                      </span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#FF5500] transition-all duration-100"
-                        style={{
-                          width: `${Math.round(
-                            (traversalStep.globalStep / Math.max(1, traversalStep.totalSteps)) *
-                              100,
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className={`mt-1.5 text-xs font-mono font-medium ${mutedText}`}>
-                    Watch the glowing beacon travel across each amino acid residue on the 3D ribbon
-                    as its note plays!
-                  </div>
-                )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => triggerSolvedTraversal(activeLevel)}
+                    className="px-2.5 py-1 rounded-lg bg-[#FF5500] hover:bg-[#FF6A1A] text-black font-mono text-xs font-bold"
+                  >
+                    {isPlayingSymphony ? 'Restart' : '▶ Play'}
+                  </button>
+                  <button
+                    onClick={() => setShowLevelClearModal(true)}
+                    className={`px-2.5 py-1 rounded-lg border font-mono text-xs font-bold ${btnClass}`}
+                  >
+                    Scorecard
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* ── 4. Control Dock: Clean Right-Hand Sidebar on Desktop / Bottom Dock on Mobile ── */}
+        {/* ── 4. Controls: Desktop Right Sidebar OR Simplified Mobile Bottom Dock ── */}
         <aside
-          className={`shrink-0 border-t lg:border-t-0 lg:border-l lg:w-[330px] xl:w-[355px] lg:overflow-y-auto px-2.5 sm:px-4 py-2 lg:p-4 flex flex-col gap-3.5 ${panelClass}`}
+          className={`shrink-0 border-t lg:border-t-0 lg:border-l lg:w-[320px] xl:w-[350px] lg:overflow-y-auto px-2.5 sm:px-4 py-2 lg:p-4 flex flex-col gap-3 ${panelClass}`}
         >
-          {/* Desktop Subunit Selector Cards with Clear Alignment Progress Bars */}
-          <div className="hidden lg:flex flex-col gap-2">
+          {/* Desktop Subunit List with Progress Bars */}
+          <div className="hidden lg:flex flex-col gap-1.5">
             <div className={`flex items-center justify-between text-xs font-mono font-bold uppercase ${mutedText}`}>
-              <span>Protein Subunits</span>
-              <span>Alignment %</span>
+              <span>Subunits</span>
+              <span>Alignment</span>
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
               {activeLevel.subunits.map((sub, idx) => {
                 const isSelected = idx === activeSubunitIdx
                 const tf = transforms[idx]
@@ -982,18 +904,18 @@ export function GameView() {
                   <div
                     key={sub.id}
                     onClick={() => setActiveSubunitIdx(idx)}
-                    className={`p-2.5 rounded-xl border text-xs font-mono cursor-pointer transition-all ${
+                    className={`p-2 rounded-xl border text-xs font-mono cursor-pointer transition-all ${
                       isSelected
                         ? isLight
-                          ? 'bg-orange-50/70 border-2 border-[#FF5500] text-slate-900 shadow-sm'
+                          ? 'bg-orange-50 border-2 border-[#FF5500] text-slate-900 shadow-xs'
                           : 'bg-[#1E293B] border-2 border-[#FF5500] text-[#E2E8F0]'
-                        : `${subCardBase} hover:border-slate-400`
+                        : `${subCardBase} hover:border-slate-300`
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center justify-between gap-1.5 mb-1">
+                      <div className="flex items-center gap-1.5 min-w-0">
                         <span
-                          className="w-3.5 h-3.5 rounded-full shrink-0 border border-black/20"
+                          className="w-3 h-3 rounded-full shrink-0"
                           style={{ backgroundColor: sub.color }}
                         />
                         <span className="font-bold truncate">{sub.name}</span>
@@ -1003,43 +925,34 @@ export function GameView() {
                           e.stopPropagation()
                           handlePlaySoloSubunit(idx)
                         }}
-                        className={`px-2 py-0.5 text-[11px] rounded border font-bold transition-colors shrink-0 ${
+                        className={`px-2 py-0.5 text-[11px] rounded border font-bold shrink-0 transition-colors ${
                           isSoloThis
                             ? 'bg-[#FF5500] text-black border-[#FF5500]'
                             : isLight
                               ? 'bg-white border-slate-300 text-slate-800 hover:border-[#FF5500]'
                               : 'bg-[#0B0F17] border-slate-700 text-slate-200 hover:border-[#FF5500]'
                         }`}
-                        title="Listen to this subunit's melody"
+                        title="Listen to this subunit's solo melody"
                       >
-                        {isSoloThis ? '■ Stop' : '♪ Listen'}
+                        {isSoloThis ? '■ Stop' : '♪ Tune'}
                       </button>
                     </div>
 
-                    {/* Clear Subunit Alignment Progress Bar & Percentage */}
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden border border-slate-300/80 dark:border-slate-700">
                         <div
                           className={`h-full transition-all duration-200 ${
-                            subPct >= 100
-                              ? 'bg-emerald-600'
-                              : subPct >= 85
-                                ? 'bg-sky-600'
-                                : 'bg-[#FF5500]'
+                            subPct >= 100 ? 'bg-emerald-600' : subPct >= 85 ? 'bg-sky-600' : 'bg-[#FF5500]'
                           }`}
                           style={{ width: `${subPct}%` }}
                         />
                       </div>
                       <span
-                        className={`text-xs font-extrabold tabular-nums shrink-0 ${
+                        className={`text-xs font-bold tabular-nums shrink-0 ${
                           subPct >= 100 ? greenText : subPct >= 85 ? blueText : orangeText
                         }`}
                       >
-                        {subPct >= 100
-                          ? '100% Docked ✓'
-                          : subPct >= 85
-                            ? `${subPct}% (Snap Ready)`
-                            : `${subPct}%`}
+                        {subPct >= 100 ? '100% ✓' : `${subPct}%`}
                       </span>
                     </div>
                   </div>
@@ -1049,17 +962,41 @@ export function GameView() {
           </div>
 
           {!isLevelSolved ? (
-            /* Unsolved Human-Friendly Controls */
-            <div className="grid grid-cols-1 sm:grid-cols-12 lg:flex lg:flex-col gap-2 lg:gap-4 items-center lg:items-stretch">
-              {/* 1. Move Subunit (Left, Right, Up, Down, Closer, Further) */}
-              <div className="sm:col-span-5 lg:w-full flex flex-col gap-1.5">
-                <div className={`flex items-center justify-between text-xs font-mono font-bold ${mutedText}`}>
-                  <span>1. Move {activeSubunit?.name}</span>
+            /* Unsolved Controls */
+            <div className="flex flex-col gap-2.5">
+              {/* Mobile Tabbed Switcher: Move vs Rotate to prevent clutter */}
+              <div className="lg:hidden flex rounded-lg p-0.5 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700">
+                <button
+                  onClick={() => setMobileControlTab('move')}
+                  className={`flex-1 py-1 text-xs font-mono font-bold rounded-md transition-colors ${
+                    mobileControlTab === 'move'
+                      ? 'bg-white dark:bg-slate-900 text-black dark:text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  1. Move Subunit
+                </button>
+                <button
+                  onClick={() => setMobileControlTab('rotate')}
+                  className={`flex-1 py-1 text-xs font-mono font-bold rounded-md transition-colors ${
+                    mobileControlTab === 'rotate'
+                      ? 'bg-white dark:bg-slate-900 text-black dark:text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  2. Turn &amp; Spin
+                </button>
+              </div>
+
+              {/* 1. Move Pad (Visible on Desktop OR when mobile tab is 'move') */}
+              <div className={`${mobileControlTab === 'move' ? 'flex' : 'hidden'} lg:flex flex-col gap-1.5`}>
+                <div className={`hidden lg:flex items-center justify-between text-xs font-mono font-bold ${mutedText}`}>
+                  <span>1. Move Subunit</span>
                 </div>
                 <div className="grid grid-cols-6 lg:grid-cols-2 gap-1.5">
                   <button
                     onClick={() => handleTranslate(-1, 0, 0)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('SlideLeft') ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
                   >
@@ -1067,7 +1004,7 @@ export function GameView() {
                   </button>
                   <button
                     onClick={() => handleTranslate(1, 0, 0)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('SlideRight') ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
                   >
@@ -1075,7 +1012,7 @@ export function GameView() {
                   </button>
                   <button
                     onClick={() => handleTranslate(0, 1, 0)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('SlideUp') ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
                   >
@@ -1083,7 +1020,7 @@ export function GameView() {
                   </button>
                   <button
                     onClick={() => handleTranslate(0, -1, 0)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('SlideDown') ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
                   >
@@ -1091,184 +1028,216 @@ export function GameView() {
                   </button>
                   <button
                     onClick={() => handleTranslate(0, 0, 1)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('SlideForward') ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
-                    title="Move subunit closer toward you"
                   >
                     ⊕ Closer
                   </button>
                   <button
                     onClick={() => handleTranslate(0, 0, -1)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('SlideBack') ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
-                    title="Push subunit further away"
                   >
                     ⊖ Further
                   </button>
                 </div>
               </div>
 
-              {/* 2. Turn & Spin Subunit (Tilt, Turn, Spin) */}
-              <div className="sm:col-span-4 lg:w-full flex flex-col gap-1.5">
-                <div className={`flex items-center justify-between text-xs font-mono font-bold ${mutedText}`}>
+              {/* 2. Turn Pad (Visible on Desktop OR when mobile tab is 'rotate') */}
+              <div className={`${mobileControlTab === 'rotate' ? 'flex' : 'hidden'} lg:flex flex-col gap-1.5`}>
+                <div className={`hidden lg:flex items-center justify-between text-xs font-mono font-bold ${mutedText}`}>
                   <span>2. Turn &amp; Spin</span>
                 </div>
                 <div className="grid grid-cols-6 lg:grid-cols-2 gap-1.5">
                   <button
                     onClick={() => handleRotate('X', -1)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('RotateX', -1) ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
                   >
-                    <span className="lg:hidden">↺ Tilt↑</span>
-                    <span className="hidden lg:inline">↺ Tilt Up</span>
+                    ↺ Tilt Up
                   </button>
                   <button
                     onClick={() => handleRotate('X', 1)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('RotateX', 1) ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
                   >
-                    <span className="lg:hidden">↻ Tilt↓</span>
-                    <span className="hidden lg:inline">↻ Tilt Down</span>
+                    ↻ Tilt Down
                   </button>
                   <button
                     onClick={() => handleRotate('Y', -1)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('RotateY', -1) ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
                   >
-                    <span className="lg:hidden">↺ Turn←</span>
-                    <span className="hidden lg:inline">↺ Turn Left</span>
+                    ↺ Turn Left
                   </button>
                   <button
                     onClick={() => handleRotate('Y', 1)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('RotateY', 1) ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
                   >
-                    <span className="lg:hidden">↻ Turn→</span>
-                    <span className="hidden lg:inline">↻ Turn Right</span>
+                    ↻ Turn Right
                   </button>
                   <button
                     onClick={() => handleRotate('Z', -1)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('RotateZ', -1) ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
                   >
-                    <span className="lg:hidden">↶ Spin←</span>
-                    <span className="hidden lg:inline">↶ Spin Left</span>
+                    ↶ Spin Left
                   </button>
                   <button
                     onClick={() => handleRotate('Z', 1)}
-                    className={`py-2 lg:py-2.5 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
+                    className={`py-2 text-xs font-mono rounded-lg border active:scale-95 ${btnClass} ${
                       isHintMatch('RotateZ', 1) ? 'ring-2 ring-[#FF5500] bg-orange-500/20' : ''
                     }`}
                   >
-                    <span className="lg:hidden">↷ Spin→</span>
-                    <span className="hidden lg:inline">↷ Spin Right</span>
+                    ↷ Spin Right
                   </button>
                 </div>
               </div>
 
-              {/* 3. Hint, Snap (85%+) & Reset */}
-              <div className="sm:col-span-3 lg:w-full flex flex-col gap-1.5">
-                <div className="flex items-center justify-between text-xs font-mono font-bold">
-                  <span className={mutedText}>3. Assist &amp; Snap</span>
-                  <span className={canSnapActive ? greenText : mutedText}>
-                    {canSnapActive ? 'Snap Ready!' : `Subunit: ${activeSubunitPct}%`}
-                  </span>
+              {/* 3. Assist & Snap Action Bar */}
+              <div className="grid grid-cols-3 lg:grid-cols-1 gap-1.5 pt-1 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  onClick={handleRequestHint}
+                  className={`py-2 text-xs font-mono font-bold rounded-lg border transition-colors ${
+                    showHint
+                      ? 'bg-[#FF5500] text-black border-[#FF5500]'
+                      : isLight
+                        ? 'bg-orange-50 border-orange-300 text-orange-800 hover:bg-orange-100'
+                        : 'border-[#FF5500]/60 text-[#FF5500] hover:bg-[#FF5500]/10'
+                  }`}
+                >
+                  💡 Hint {showHint ? '(On)' : ''}
+                </button>
+                <button
+                  onClick={handleSnapSubunit}
+                  disabled={!canSnapActive}
+                  className={`py-2 text-xs font-mono font-bold rounded-lg border transition-colors ${
+                    canSnapActive
+                      ? 'bg-emerald-500 text-black border-emerald-600 hover:bg-emerald-400 shadow-sm animate-pulse'
+                      : isLight
+                        ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                        : 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500'
+                  }`}
+                  title={
+                    canSnapActive
+                      ? 'Snap subunit into place'
+                      : `Snap unlocks at 85% alignment (currently ${activeSubunitPct}%)`
+                  }
+                >
+                  🧲 Snap ({activeSubunitPct}%)
+                </button>
+                <button
+                  onClick={handleResetLevel}
+                  className={`py-2 text-xs font-mono rounded-lg border ${btnClass}`}
+                  title="Reset positions"
+                >
+                  ↺ Reset
+                </button>
+              </div>
+
+              {/* 4. Sonification Algorithm & Style (Genre) Selectors */}
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex flex-col gap-2">
+                <div className={`text-[11px] font-mono font-bold uppercase ${mutedText}`}>
+                  Sound &amp; Style Settings
                 </div>
-                <div className="grid grid-cols-3 lg:grid-cols-1 gap-1.5">
-                  <button
-                    onClick={handleRequestHint}
-                    className={`py-2 lg:py-2.5 text-xs font-mono font-bold rounded-lg border transition-colors ${
-                      showHint
-                        ? 'bg-[#FF5500] text-black border-[#FF5500]'
-                        : isLight
-                          ? 'bg-orange-50 border-orange-400 text-orange-800 hover:bg-orange-100'
-                          : 'border-[#FF5500]/60 text-[#FF5500] hover:bg-[#FF5500]/10'
-                    }`}
-                  >
-                    💡 Hint {showHint ? '(On)' : ''}
-                  </button>
-                  <button
-                    onClick={handleSnapSubunit}
-                    disabled={!canSnapActive}
-                    className={`py-2 lg:py-2.5 text-xs font-mono font-bold rounded-lg border transition-colors ${
-                      canSnapActive
-                        ? 'bg-emerald-500 text-black border-emerald-600 hover:bg-emerald-400 shadow-sm animate-pulse'
-                        : isLight
-                          ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed'
-                          : 'opacity-40 cursor-not-allowed border-slate-700 text-slate-500'
-                    }`}
-                    title={
-                      canSnapActive
-                        ? 'Snap subunit into exact 100% alignment'
-                        : `Reach 85% subunit alignment to unlock Snap (currently ${activeSubunitPct}%)`
-                    }
-                  >
-                    <span className="lg:hidden">🧲 Snap</span>
-                    <span className="hidden lg:inline">
-                      🧲 Snap into Place ({activeSubunitPct}% / 85%)
-                    </span>
-                  </button>
-                  <button
-                    onClick={handleResetLevel}
-                    className={`py-2 text-xs font-mono rounded-lg border ${btnClass}`}
-                    title="Reset level"
-                  >
-                    ↺ Reset
-                  </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className={`block text-[10px] font-mono uppercase mb-0.5 ${mutedText}`}>
+                      Algorithm
+                    </label>
+                    <select
+                      value={effectiveAlgo}
+                      onChange={(e) => setSelectedAlgorithm(e.target.value as SonifyAlgorithm)}
+                      className={`w-full rounded-md border px-2 py-1 text-xs font-mono focus:outline-none focus:border-[#FF5500] ${
+                        isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#0B0F17] border-slate-700 text-[#E2E8F0]'
+                      }`}
+                    >
+                      <option value="Fantaisie-Impromptu">Fantaisie-Impromptu</option>
+                      <option value="Algo-I">Sonifyed I (Hydrophobicity)</option>
+                      <option value="Algo-II">Sonifyed II (Reduced 4-Note)</option>
+                      <option value="Algo-III">Sonifyed III (+ Chords)</option>
+                      <option value="Algo-IV">Sonifyed IV (Sequence Entropy)</option>
+                      <option value="Algo-V">Sonifyed V (+ Harmonics)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className={`block text-[10px] font-mono uppercase mb-0.5 ${mutedText}`}>
+                      Music Genre
+                    </label>
+                    <select
+                      value={effectiveStyle}
+                      onChange={(e) => setSelectedStyle(e.target.value as MusicalStyle)}
+                      className={`w-full rounded-md border px-2 py-1 text-xs font-mono focus:outline-none focus:border-[#FF5500] ${
+                        isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#0B0F17] border-slate-700 text-[#E2E8F0]'
+                      }`}
+                    >
+                      <option value="Classical">Classical Piano</option>
+                      <option value="Jazz">Jazz (Swing)</option>
+                      <option value="Punk">Rock / Punk</option>
+                      <option value="Ambient">Ambient</option>
+                      <option value="Lo-Fi">Lo-Fi Chill</option>
+                      <option value="Synthwave">Synthwave 80s</option>
+                      <option value="Techno">Techno</option>
+                      <option value="Afrobeat">Afrobeat</option>
+                      <option value="Folk">Folk Acoustic</option>
+                      <option value="Default">Standard Synth</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
           ) : (
-            /* Solved Action Panel (Right Sidebar on Desktop / Bottom Bar on Mobile) */
-            <div className="flex flex-col gap-3">
-              {/* Scorecard Box */}
+            /* Solved Action Panel */
+            <div className="flex flex-col gap-2.5">
               <div className={`p-3 rounded-xl border ${subCardBase}`}>
                 <div className="text-xs font-mono font-bold">
-                  Used <span className={orangeText}>{hintsUsed} 💡</span> &amp;{' '}
-                  <span className={blueText}>{snapsUsed} 🧲</span> in{' '}
-                  <span className="font-extrabold">{movesCount}</span> moves
+                  Solved in <span className="font-extrabold">{movesCount} moves</span> ·{' '}
+                  <span className={orangeText}>{hintsUsed} 💡</span> ·{' '}
+                  <span className={blueText}>{snapsUsed} 🧲</span>
                 </div>
                 <div className="text-base tracking-widest mt-1 select-all">{emojiSummary}</div>
               </div>
 
-              {/* Share & Download Buttons */}
-              <div className="flex flex-wrap lg:flex-col gap-2">
+              <div className="flex flex-col gap-2">
                 <button
                   onClick={handleCopyScorecard}
-                  className="flex-1 lg:w-full px-3 py-2.5 rounded-lg bg-[#FF5500] hover:bg-[#FF6A1A] text-black text-xs font-mono font-bold transition-colors"
+                  className="w-full py-2.5 rounded-lg bg-[#FF5500] hover:bg-[#FF6A1A] text-black text-xs font-mono font-bold transition-colors shadow-xs"
                 >
-                  {copiedScore ? '✓ Copied Score!' : '📋 Copy Score'}
+                  {copiedScore ? '✓ Copied Scorecard!' : '📋 Copy Emoji Score'}
                 </button>
 
                 <button
                   onClick={handleDownloadScorecardPng}
-                  className={`flex-1 lg:w-full px-3 py-2.5 rounded-lg border text-xs font-mono font-bold ${btnClass}`}
+                  className={`w-full py-2.5 rounded-lg border text-xs font-mono font-bold ${btnClass}`}
                 >
-                  📥 Save Score Card (.png)
+                  📥 Download Scorecard (.png)
                 </button>
 
                 <button
                   onClick={handleDownloadSymphonyVideo}
                   disabled={isRecordingVideo}
-                  className="w-full px-3.5 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-mono font-bold disabled:opacity-50 transition-colors"
+                  className="w-full py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-mono font-bold disabled:opacity-50 transition-colors shadow-xs"
                 >
                   {isRecordingVideo
-                    ? `🎬 Recording 3D Video (${recordingProgress}%)…`
+                    ? `🎬 Recording Video (${recordingProgress}%)…`
                     : '🎬 Download 3D Symphony Video'}
                 </button>
 
+                {/* Wikipedia button only appears after solving! */}
                 <a
                   href={activeLevel.wikipediaUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`flex-1 lg:w-full px-3 py-2 rounded-lg border text-center text-xs font-mono font-bold ${btnClass}`}
+                  className={`w-full py-2 rounded-lg border text-center text-xs font-mono font-bold ${btnClass}`}
                 >
                   📖 Learn on Wikipedia ↗
                 </a>
@@ -1279,7 +1248,7 @@ export function GameView() {
                       stopPlayback()
                       nextLevel()
                     }}
-                    className="w-full px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold"
+                    className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold shadow-xs"
                   >
                     Next Level ({activeLevel.id + 1}) →
                   </button>
@@ -1289,7 +1258,7 @@ export function GameView() {
                       stopPlayback()
                       setActiveTab('custom')
                     }}
-                    className="w-full px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold"
+                    className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold shadow-xs"
                   >
                     🧬 Fold Your Own Protein →
                   </button>
@@ -1300,25 +1269,19 @@ export function GameView() {
         </aside>
       </div>
 
-      {/* ── Optional Scorecard Modal (When user clicks "🏆 Scorecard") ── */}
+      {/* ── Optional Scorecard Modal ───────────────────────────────────────── */}
       {showLevelClearModal && (
         <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => setShowLevelClearModal(false)}
         >
           <div
-            className={`max-w-md w-full rounded-xl border p-6 space-y-5 shadow-2xl ${panelClass}`}
+            className={`max-w-md w-full rounded-2xl border p-6 space-y-5 shadow-2xl ${panelClass}`}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between">
               <div>
-                <span
-                  className={`text-[11px] font-mono uppercase px-2 py-0.5 rounded font-bold ${
-                    isLight
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-emerald-500/20 text-emerald-300'
-                  }`}
-                >
+                <span className="text-[11px] font-mono uppercase px-2 py-0.5 rounded font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">
                   Level {activeLevel.levelNumber} Solved
                 </span>
                 <h2 className="text-lg font-mono font-bold mt-1">{activeLevel.title}</h2>
@@ -1326,23 +1289,23 @@ export function GameView() {
               </div>
               <button
                 onClick={() => setShowLevelClearModal(false)}
-                className={`text-sm font-mono px-2.5 py-1 rounded ${btnClass}`}
+                className={`text-sm font-mono px-2.5 py-1 rounded-lg ${btnClass}`}
               >
                 ✕
               </button>
             </div>
 
-            <div className={`p-4 rounded-lg border space-y-3 ${subCardBase}`}>
+            <div className={`p-4 rounded-xl border space-y-3 ${subCardBase}`}>
               <div className="grid grid-cols-3 gap-2 text-center font-mono">
-                <div className="p-2 rounded border border-current/15">
+                <div className="p-2 rounded-lg border border-current/15">
                   <div className="text-lg font-bold">{movesCount}</div>
                   <div className={`text-[10px] font-bold ${mutedText}`}>MOVES</div>
                 </div>
-                <div className="p-2 rounded border border-current/15">
+                <div className="p-2 rounded-lg border border-current/15">
                   <div className={`text-lg font-bold ${orangeText}`}>{hintsUsed} 💡</div>
                   <div className={`text-[10px] font-bold ${mutedText}`}>HINTS</div>
                 </div>
-                <div className="p-2 rounded border border-current/15">
+                <div className="p-2 rounded-lg border border-current/15">
                   <div className={`text-lg font-bold ${blueText}`}>{snapsUsed} 🧲</div>
                   <div className={`text-[10px] font-bold ${mutedText}`}>SNAPS</div>
                 </div>
@@ -1359,13 +1322,13 @@ export function GameView() {
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <button
                   onClick={handleCopyScorecard}
-                  className="py-2 rounded bg-[#FF5500] hover:bg-[#FF6A1A] text-black font-mono text-xs font-bold"
+                  className="py-2 rounded-lg bg-[#FF5500] hover:bg-[#FF6A1A] text-black font-mono text-xs font-bold"
                 >
                   {copiedScore ? '✓ Copied!' : '📋 Copy Score'}
                 </button>
                 <button
                   onClick={handleDownloadScorecardPng}
-                  className={`py-2 rounded border font-mono text-xs font-bold ${btnClass}`}
+                  className={`py-2 rounded-lg border font-mono text-xs font-bold ${btnClass}`}
                 >
                   📥 Download PNG
                 </button>
@@ -1379,7 +1342,7 @@ export function GameView() {
                   handleDownloadSymphonyVideo()
                 }}
                 disabled={isRecordingVideo}
-                className="w-full py-2.5 rounded bg-sky-600 hover:bg-sky-700 text-white font-mono text-xs font-bold"
+                className="w-full py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-mono text-xs font-bold"
               >
                 🎬 Record &amp; Download 3D Symphony Video
               </button>
@@ -1388,7 +1351,7 @@ export function GameView() {
                 href={activeLevel.wikipediaUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`block w-full py-2 rounded border text-center font-mono text-xs font-bold ${btnClass}`}
+                className={`block w-full py-2 rounded-lg border text-center font-mono text-xs font-bold ${btnClass}`}
               >
                 📖 Learn About {activeLevel.title} on Wikipedia ↗
               </a>

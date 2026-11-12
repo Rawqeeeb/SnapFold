@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { DockingHintData } from '../wasm/wasmBridge'
 import { CAMPAIGN_LEVELS, type GameLevel } from '../game/levels'
+import type { SonifyAlgorithm } from '../components/Sonification/AlgorithmEngine'
+import type { MusicalStyle } from '../components/Sonification/StyleEngine'
 
 export interface LevelScoreRecord {
   hints: number
@@ -28,6 +30,10 @@ interface GameState {
   showHint: boolean
   showControlsGuide: boolean
   showLevelClearModal: boolean
+
+  // User selectable Sonification Algorithm & Musical Style
+  selectedAlgorithm: SonifyAlgorithm | null
+  selectedStyle: MusicalStyle
 
   // Current level telemetry for Wordle/Strands style scorecard
   hintsUsed: number
@@ -60,6 +66,8 @@ interface GameState {
   setActivePlayingResidue: (subIdx: number | null, resIdx: number | null) => void
   setShowControlsGuide: (show: boolean) => void
   setShowLevelClearModal: (show: boolean) => void
+  setSelectedAlgorithm: (algo: SonifyAlgorithm) => void
+  setSelectedStyle: (style: MusicalStyle) => void
   setActiveTab: (tab: 'game' | 'custom' | 'docs' | 'about') => void
   resetLevelProgress: () => void
 }
@@ -67,7 +75,7 @@ interface GameState {
 export const useGameStore = create<GameState>()(
   persist(
     (set, get) => ({
-      theme: 'light', // Light mode is now the default
+      theme: 'light',
       currentLevelId: 1,
       customLevel: null,
       completedLevelIds: [],
@@ -85,6 +93,9 @@ export const useGameStore = create<GameState>()(
       showControlsGuide: false,
       showLevelClearModal: false,
 
+      selectedAlgorithm: null,
+      selectedStyle: 'Classical',
+
       hintsUsed: 0,
       snapsUsed: 0,
       movesCount: 0,
@@ -97,10 +108,18 @@ export const useGameStore = create<GameState>()(
         set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' }))
       },
 
+      setSelectedAlgorithm: (algo: SonifyAlgorithm) => {
+        set({ selectedAlgorithm: algo })
+      },
+
+      setSelectedStyle: (style: MusicalStyle) => {
+        set({ selectedStyle: style })
+      },
+
       selectLevel: (id: number) => {
         set({
           currentLevelId: id,
-          activeSubunitIdx: 1, // Default to first movable subunit (B)
+          activeSubunitIdx: 1,
           alignmentScore: 0.5,
           isLevelSolved: false,
           isPlayingSolo: false,
@@ -159,7 +178,6 @@ export const useGameStore = create<GameState>()(
         } = get()
         const updated = Array.from(new Set([...completedLevelIds, currentLevelId]))
         const emojis = finalEmojis || [...emojiTrail, '🧬', '🎵'].join('')
-        // Do NOT open showLevelClearModal immediately; let the 3D protein symphony play first!
         set({
           completedLevelIds: updated,
           isLevelSolved: true,
@@ -280,7 +298,7 @@ export const useGameStore = create<GameState>()(
       },
     }),
     {
-      name: 'snapfold-game-storage-v3',
+      name: 'snapfold-game-storage-v4',
       partialize: (state) => ({
         theme: state.theme,
         completedLevelIds: state.completedLevelIds,
@@ -288,6 +306,8 @@ export const useGameStore = create<GameState>()(
         currentLevelId: state.currentLevelId,
         levelScores: state.levelScores,
         customLevel: state.customLevel,
+        selectedAlgorithm: state.selectedAlgorithm,
+        selectedStyle: state.selectedStyle,
       }),
     },
   ),
