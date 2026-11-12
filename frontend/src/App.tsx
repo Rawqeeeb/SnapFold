@@ -114,17 +114,21 @@ export default function App() {
       <header
         className={`h-14 border-b px-2.5 sm:px-6 flex items-center justify-between shrink-0 select-none ${headerClass}`}
       >
-        {/* Brand: SnapFold */}
+        {/* Brand: SnapFold (Clicking returns to Home / Play) */}
         <div
+          role="button"
+          tabIndex={0}
           onClick={() => setActiveTab('game')}
-          className="flex items-center space-x-2 sm:space-x-2.5 cursor-pointer"
+          onKeyDown={(e) => e.key === 'Enter' && setActiveTab('game')}
+          title="SnapFold — Home / Play"
+          className="flex items-center space-x-2 sm:space-x-2.5 cursor-pointer group hover:opacity-95 transition-opacity"
         >
-          <div className="w-7 h-7 bg-[#FF5500] rounded flex items-center justify-center font-mono font-bold text-black text-xs sm:text-sm shrink-0">
+          <div className="w-7 h-7 bg-[#FF5500] group-hover:scale-105 transition-transform rounded flex items-center justify-center font-mono font-bold text-black text-xs sm:text-sm shrink-0 shadow-xs">
             SF
           </div>
           <div>
             <div className="flex items-center space-x-1.5">
-              <span className="font-mono font-bold text-sm sm:text-base tracking-tight">
+              <span className="font-mono font-bold text-sm sm:text-base tracking-tight group-hover:text-[#FF5500] transition-colors">
                 SnapFold
               </span>
               <span
@@ -140,21 +144,6 @@ export default function App() {
 
         {/* Navigation Tabs (Merged Docs & About) */}
         <nav className="flex items-center space-x-1 sm:space-x-2">
-          <button
-            onClick={() => setActiveTab('game')}
-            className={`px-2.5 sm:px-3.5 py-1.5 text-xs font-mono rounded-lg transition-colors flex items-center space-x-1.5 ${
-              activeTab === 'game'
-                ? isLight
-                  ? 'bg-orange-100 text-orange-900 font-bold border border-orange-400'
-                  : 'bg-[#FF5500]/15 text-[#FF5500] font-bold border border-[#FF5500]/50'
-                : inactiveTabClass
-            }`}
-          >
-            <span>🎮</span>
-            <span className="hidden sm:inline">Play (10 Levels)</span>
-            <span className="sm:hidden">Play</span>
-          </button>
-
           <button
             onClick={() => setActiveTab('custom')}
             className={`px-2.5 sm:px-3.5 py-1.5 text-xs font-mono rounded-lg transition-colors flex items-center space-x-1.5 ${

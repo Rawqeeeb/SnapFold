@@ -246,8 +246,7 @@ export function DocsPage({ onNavigate }: Props) {
           <p className={`text-xs sm:text-sm ${mutedText}`}>
             Levels 1–5 are approachable 2-subunit puzzles that unlock the{' '}
             <strong>🧬 Fold Custom</strong> mode once cleared. Levels 6–10 challenge you with 3- and
-            4-subunit quaternary complexes. Click <strong>Wikipedia ↗</strong> on any protein to
-            learn more about its biological role.
+            4-subunit quaternary complexes with real biological coordinates from the Protein Data Bank.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {CAMPAIGN_LEVELS.map((lvl) => (
@@ -272,7 +271,7 @@ export function DocsPage({ onNavigate }: Props) {
                   </p>
                 </div>
                 <a
-                  href={lvl.wikipediaUrl}
+                  href={`https://www.rcsb.org/structure/${lvl.pdbCode}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className={`shrink-0 text-xs font-mono px-2.5 py-1 rounded border font-semibold transition-colors ${
@@ -280,8 +279,9 @@ export function DocsPage({ onNavigate }: Props) {
                       ? 'border-sky-600 bg-sky-50 text-sky-800 hover:bg-sky-600 hover:text-white'
                       : 'border-[#00F5D4]/50 text-[#00F5D4] hover:bg-[#00F5D4] hover:text-black'
                   }`}
+                  title="View structure on RCSB Protein Data Bank"
                 >
-                  Wiki ↗
+                  PDB ↗
                 </a>
               </div>
             ))}

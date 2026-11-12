@@ -164,8 +164,24 @@ export async function startAudioContext(): Promise<void> {
 }
 
 export function stopPlayback(): void {
+  try {
+    _synthRH?.triggerRelease()
+    _synthLH?.triggerRelease()
+  } catch (_) {
+    /* ignore */
+  }
   Tone.Transport.stop()
   Tone.Transport.cancel()
+}
+
+export function setMasterMuted(muted: boolean): boolean {
+  try {
+    const prev = Tone.getDestination().mute
+    Tone.getDestination().mute = muted
+    return prev
+  } catch {
+    return false
+  }
 }
 
 /**

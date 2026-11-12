@@ -11,6 +11,7 @@ import {
   scheduleSonification,
   scheduleProteinTraversal,
   stopPlayback,
+  setMasterMuted,
   setAlignmentAudioFeedback,
   playLockCelebration,
   getAudioRecordingStream,
@@ -93,6 +94,7 @@ export function GameView() {
   const [recordingProgress, setRecordingProgress] = useState(0)
   const [mobileControlTab, setMobileControlTab] = useState<'move' | 'rotate'>('move')
   const traversalStepRef = useRef<TraversalNoteStep | null>(null)
+  const savedVideoBlobRef = useRef<{ levelId: number; blob: Blob } | null>(null)
 
   // Compute individual subunit alignment score (0.0 -> 1.0)
   const getSubunitScore = useCallback((tf?: SubunitTransformData) => {
@@ -129,10 +131,36 @@ export function GameView() {
     [activeLevel, effectiveAlgo, effectiveStyle, setPlayingSymphony, setActivePlayingResidue],
   )
 
+  // Stop any active victory symphony / music immediately
+  const handleStopSymphony = useCallback(() => {
+    stopPlayback()
+    setPlayingSymphony(false)
+    setActivePlayingResidue(null, null)
+  }, [setPlayingSymphony, setActivePlayingResidue])
+
+  // Proceed immediately to the next level (cuts off music, resets audio)
+  const handleProceedNextLevel = useCallback(() => {
+    stopPlayback()
+    setPlayingSymphony(false)
+    setActivePlayingResidue(null, null)
+    setShowLevelClearModal(false)
+    nextLevel()
+  }, [setPlayingSymphony, setActivePlayingResidue, setShowLevelClearModal, nextLevel])
+
+  // Proceed to custom fold builder
+  const handleProceedCustom = useCallback(() => {
+    stopPlayback()
+    setPlayingSymphony(false)
+    setActivePlayingResidue(null, null)
+    setShowLevelClearModal(false)
+    setActiveTab('custom')
+  }, [setPlayingSymphony, setActivePlayingResidue, setShowLevelClearModal, setActiveTab])
+
   // Initialize Docking Engine when level changes
   useEffect(() => {
     let active = true
     stopPlayback()
+    savedVideoBlobRef.current = null
     setEngineReady(false)
     setTraversalStep(null)
     traversalStepRef.current = null
@@ -510,10 +538,26 @@ export function GameView() {
     document.body.removeChild(a)
   }
 
-  // Record & Download 3D Symphony Video WITHOUT ANY CLUTTER OR CARDS OBSCURING THE PROTEIN
+  // Record & Download 3D Symphony Video as MP4 WITHOUT OBSCURING PROTEIN AND WITHOUT RE-PLAYING AUDIO TO SPEAKERS
   const handleDownloadSymphonyVideo = async () => {
     const glCanvas = gameCanvasRef.current?.getCanvas()
     if (!glCanvas || isRecordingVideo) return
+
+    // If already generated for this level, download instantly with 0ms wait and 0 audio!
+    const cached = savedVideoBlobRef.current
+    if (cached && cached.levelId === activeLevel.id) {
+      const url = URL.createObjectURL(cached.blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `snapfold-level-${activeLevel.levelNumber}-${activeLevel.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')}.mp4`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      return
+    }
 
     setIsRecordingVideo(true)
     setRecordingProgress(5)
@@ -575,11 +619,13 @@ export function GameView() {
     }
     const combinedStream = new MediaStream(combinedTracks)
 
+    // Prioritize MP4 formats
     const mimeTypes = [
+      'video/mp4;codecs=avc1,mp4a.40.2',
+      'video/mp4',
       'video/webm;codecs=vp9,opus',
       'video/webm;codecs=vp8,opus',
       'video/webm',
-      'video/mp4',
     ]
     const supportedMime = mimeTypes.find((m) => MediaRecorder.isTypeSupported(m)) || ''
     const chunks: BlobPart[] = []
@@ -592,16 +638,20 @@ export function GameView() {
       if (e.data && e.data.size > 0) chunks.push(e.data)
     }
 
+    // MUTE master speaker output so users don't have to listen to the song again while recording
+    const prevMuted = setMasterMuted(true)
+
     recorder.onstop = () => {
       animActive = false
-      const blob = new Blob(chunks, { type: supportedMime || 'video/webm' })
-      const ext = supportedMime.includes('mp4') ? 'mp4' : 'webm'
+      setMasterMuted(prevMuted)
+      const blob = new Blob(chunks, { type: supportedMime || 'video/mp4' })
+      savedVideoBlobRef.current = { levelId: activeLevel.id, blob }
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
       a.download = `snapfold-level-${activeLevel.levelNumber}-${activeLevel.title
         .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')}.${ext}`
+        .replace(/[^a-z0-9]+/g, '-')}.mp4`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -612,7 +662,7 @@ export function GameView() {
 
     recorder.start(100)
 
-    setPlayingSymphony(true)
+    // Run the traversal: audio flows into media recorder stream, but master speakers are muted
     await scheduleProteinTraversal(
       activeLevel,
       (step) => {
@@ -622,11 +672,10 @@ export function GameView() {
         setRecordingProgress(Math.round((step.globalStep / Math.max(1, step.totalSteps)) * 100))
       },
       () => {
-        setPlayingSymphony(false)
         setActivePlayingResidue(null, null)
         setTimeout(() => {
           if (recorder.state !== 'inactive') recorder.stop()
-        }, 350)
+        }, 300)
       },
       effectiveAlgo,
       effectiveStyle,
@@ -660,7 +709,7 @@ export function GameView() {
 
   return (
     <div className="relative w-full h-[calc(100dvh-3.5rem)] flex flex-col overflow-hidden">
-      {/* ── 1. Top Level & Overall Progress Bar (No Wikipedia during game!) ── */}
+      {/* ── 1. Top Level & Overall Progress Bar ────────────────────────────── */}
       <div
         className={`shrink-0 border-b px-2.5 sm:px-4 py-2 flex items-center justify-between gap-2 ${panelClass}`}
       >
@@ -714,7 +763,7 @@ export function GameView() {
           )}
         </div>
 
-        {/* Center: Protein Level Name (Clean, no Wikipedia button while playing) */}
+        {/* Center: Protein Level Name */}
         <div className="hidden sm:flex items-center gap-2">
           <span
             className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-bold ${
@@ -851,31 +900,59 @@ export function GameView() {
           {isLevelSolved && (
             <div className="absolute bottom-14 left-3 right-3 pointer-events-auto flex justify-center z-10">
               <div
-                className={`p-2.5 px-4 rounded-xl border-2 border-emerald-500 shadow-lg backdrop-blur-md max-w-xl w-full flex items-center justify-between gap-3 ${
+                className={`p-2.5 px-3 sm:px-4 rounded-xl border-2 border-emerald-500 shadow-lg backdrop-blur-md max-w-xl w-full flex items-center justify-between gap-2 sm:gap-3 ${
                   isLight ? 'bg-white/95 text-slate-900' : 'bg-[#0B0F17]/95 text-[#E2E8F0]'
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                   <span className="font-mono font-bold text-xs truncate">
-                    {traversalStep
-                      ? `♪ ${traversalStep.noteName} · ${traversalStep.chainName} · Res #${traversalStep.residueIndex}`
-                      : '✓ 100% Solved — Playing 3D Symphony'}
+                    {isPlayingSymphony && traversalStep
+                      ? `♪ ${traversalStep.noteName} · ${traversalStep.chainName} · #${traversalStep.residueIndex}`
+                      : '✓ 100% Solved'}
                   </span>
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    onClick={() => triggerSolvedTraversal(activeLevel)}
-                    className="px-2.5 py-1 rounded-lg bg-[#FF5500] hover:bg-[#FF6A1A] text-black font-mono text-xs font-bold"
-                  >
-                    {isPlayingSymphony ? 'Restart' : '▶ Play'}
-                  </button>
+                  {isPlayingSymphony ? (
+                    <button
+                      onClick={handleStopSymphony}
+                      className="px-2 sm:px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-mono text-xs font-bold transition-colors shadow-xs"
+                      title="Skip / Stop Music"
+                    >
+                      ⏹ Skip Music
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => triggerSolvedTraversal(activeLevel)}
+                      className="px-2 sm:px-2.5 py-1 rounded-lg bg-[#FF5500] hover:bg-[#FF6A1A] text-black font-mono text-xs font-bold transition-colors shadow-xs"
+                    >
+                      ▶ Replay
+                    </button>
+                  )}
+
+                  {activeLevel.id < CAMPAIGN_LEVELS.length ? (
+                    <button
+                      onClick={handleProceedNextLevel}
+                      className="px-2.5 sm:px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold transition-colors shadow-xs flex items-center gap-1"
+                    >
+                      <span>Next Level</span>
+                      <span>→</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleProceedCustom}
+                      className="px-2.5 sm:px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold transition-colors shadow-xs"
+                    >
+                      Fold Custom →
+                    </button>
+                  )}
+
                   <button
                     onClick={() => setShowLevelClearModal(true)}
-                    className={`px-2.5 py-1 rounded-lg border font-mono text-xs font-bold ${btnClass}`}
+                    className={`px-2 py-1 rounded-lg border font-mono text-xs font-bold ${btnClass}`}
                   >
-                    Scorecard
+                    Score
                   </button>
                 </div>
               </div>
@@ -1208,16 +1285,41 @@ export function GameView() {
               </div>
 
               <div className="flex flex-col gap-2">
+                {isPlayingSymphony && (
+                  <button
+                    onClick={handleStopSymphony}
+                    className="w-full py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-mono font-bold transition-colors shadow-xs"
+                  >
+                    ⏹ Skip Music
+                  </button>
+                )}
+
+                {activeLevel.id < CAMPAIGN_LEVELS.length ? (
+                  <button
+                    onClick={handleProceedNextLevel}
+                    className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold shadow-xs transition-colors"
+                  >
+                    Next Level ({activeLevel.id + 1}) →
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleProceedCustom}
+                    className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold shadow-xs transition-colors"
+                  >
+                    🧬 Fold Your Own Protein →
+                  </button>
+                )}
+
                 <button
                   onClick={handleCopyScorecard}
-                  className="w-full py-2.5 rounded-lg bg-[#FF5500] hover:bg-[#FF6A1A] text-black text-xs font-mono font-bold transition-colors shadow-xs"
+                  className="w-full py-2 rounded-lg bg-[#FF5500] hover:bg-[#FF6A1A] text-black text-xs font-mono font-bold transition-colors shadow-xs"
                 >
                   {copiedScore ? '✓ Copied Scorecard!' : '📋 Copy Emoji Score'}
                 </button>
 
                 <button
                   onClick={handleDownloadScorecardPng}
-                  className={`w-full py-2.5 rounded-lg border text-xs font-mono font-bold ${btnClass}`}
+                  className={`w-full py-2 rounded-lg border text-xs font-mono font-bold ${btnClass}`}
                 >
                   📥 Download Scorecard (.png)
                 </button>
@@ -1228,41 +1330,9 @@ export function GameView() {
                   className="w-full py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-mono font-bold disabled:opacity-50 transition-colors shadow-xs"
                 >
                   {isRecordingVideo
-                    ? `🎬 Recording Video (${recordingProgress}%)…`
-                    : '🎬 Download 3D Symphony Video'}
+                    ? `🎬 Generating MP4 (${recordingProgress}%)…`
+                    : '🎬 Download 3D Symphony Video (.mp4)'}
                 </button>
-
-                {/* Wikipedia button only appears after solving! */}
-                <a
-                  href={activeLevel.wikipediaUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`w-full py-2 rounded-lg border text-center text-xs font-mono font-bold ${btnClass}`}
-                >
-                  📖 Learn on Wikipedia ↗
-                </a>
-
-                {activeLevel.id < CAMPAIGN_LEVELS.length ? (
-                  <button
-                    onClick={() => {
-                      stopPlayback()
-                      nextLevel()
-                    }}
-                    className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold shadow-xs"
-                  >
-                    Next Level ({activeLevel.id + 1}) →
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      stopPlayback()
-                      setActiveTab('custom')
-                    }}
-                    className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold shadow-xs"
-                  >
-                    🧬 Fold Your Own Protein →
-                  </button>
-                )}
               </div>
             </div>
           )}
@@ -1336,25 +1406,34 @@ export function GameView() {
             </div>
 
             <div className="space-y-2">
+              {activeLevel.id < CAMPAIGN_LEVELS.length ? (
+                <button
+                  onClick={handleProceedNextLevel}
+                  className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold shadow-xs transition-colors"
+                >
+                  Proceed to Next Level ({activeLevel.id + 1}) →
+                </button>
+              ) : (
+                <button
+                  onClick={handleProceedCustom}
+                  className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold shadow-xs transition-colors"
+                >
+                  🧬 Fold Your Own Protein →
+                </button>
+              )}
+
               <button
                 onClick={() => {
                   setShowLevelClearModal(false)
                   handleDownloadSymphonyVideo()
                 }}
                 disabled={isRecordingVideo}
-                className="w-full py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-mono text-xs font-bold"
+                className="w-full py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-mono text-xs font-bold disabled:opacity-50 transition-colors"
               >
-                🎬 Record &amp; Download 3D Symphony Video
+                {isRecordingVideo
+                  ? `🎬 Generating MP4 (${recordingProgress}%)…`
+                  : '🎬 Download 3D Symphony Video (.mp4)'}
               </button>
-
-              <a
-                href={activeLevel.wikipediaUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`block w-full py-2 rounded-lg border text-center font-mono text-xs font-bold ${btnClass}`}
-              >
-                📖 Learn About {activeLevel.title} on Wikipedia ↗
-              </a>
             </div>
           </div>
         </div>

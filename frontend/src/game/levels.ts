@@ -32,7 +32,6 @@ export interface GameLevel {
   moleculeName: string
   uniprotId: string
   pdbCode: string
-  wikipediaUrl: string
   algorithm: SonifyAlgorithm
   musicalKey: string
   description: string
@@ -317,7 +316,6 @@ export const CAMPAIGN_LEVELS: GameLevel[] = [
     moleculeName: 'Insulin Heterodimer (A & B Chains)',
     uniprotId: 'P01308',
     pdbCode: '4INS',
-    wikipediaUrl: 'https://en.wikipedia.org/wiki/Insulin',
     algorithm: 'Algo-II',
     musicalKey: 'C Major',
     description:
@@ -358,7 +356,6 @@ export const CAMPAIGN_LEVELS: GameLevel[] = [
     moleculeName: 'Fast-Folding Tryptophan Cage Motif',
     uniprotId: 'P0C2T9',
     pdbCode: '1L2Y',
-    wikipediaUrl: 'https://en.wikipedia.org/wiki/Trp-cage',
     algorithm: 'Algo-I',
     musicalKey: 'G Major',
     description:
@@ -399,7 +396,6 @@ export const CAMPAIGN_LEVELS: GameLevel[] = [
     moleculeName: 'C2 Homodimeric Aspartyl Protease',
     uniprotId: 'P03366',
     pdbCode: '1HHP',
-    wikipediaUrl: 'https://en.wikipedia.org/wiki/HIV-1_protease',
     algorithm: 'Algo-III',
     musicalKey: 'D Minor',
     description:
@@ -440,7 +436,6 @@ export const CAMPAIGN_LEVELS: GameLevel[] = [
     moleculeName: 'Actin-Binding Three-Helix Bundle',
     uniprotId: 'P02640',
     pdbCode: '1YRF',
-    wikipediaUrl: 'https://en.wikipedia.org/wiki/Villin',
     algorithm: 'Algo-IV',
     musicalKey: 'E Minor',
     description:
@@ -481,7 +476,6 @@ export const CAMPAIGN_LEVELS: GameLevel[] = [
     moleculeName: 'Regulatory β-Grasp Fold Complex',
     uniprotId: 'P0CG48',
     pdbCode: '1UBQ',
-    wikipediaUrl: 'https://en.wikipedia.org/wiki/Ubiquitin',
     algorithm: 'Fantaisie-Impromptu',
     musicalKey: 'F Major',
     description:
@@ -524,7 +518,6 @@ export const CAMPAIGN_LEVELS: GameLevel[] = [
     moleculeName: 'Green Fluorescent Protein 11-Stranded Cage',
     uniprotId: 'P42212',
     pdbCode: '1GFL',
-    wikipediaUrl: 'https://en.wikipedia.org/wiki/Green_fluorescent_protein',
     algorithm: 'Algo-I',
     musicalKey: 'E Major',
     description:
@@ -577,7 +570,6 @@ export const CAMPAIGN_LEVELS: GameLevel[] = [
     moleculeName: 'Tropocollagen Right-Handed Superhelix',
     uniprotId: 'P02452',
     pdbCode: '1CAG',
-    wikipediaUrl: 'https://en.wikipedia.org/wiki/Collagen',
     algorithm: 'Algo-II',
     musicalKey: 'A Minor',
     description:
@@ -630,7 +622,6 @@ export const CAMPAIGN_LEVELS: GameLevel[] = [
     moleculeName: 'Guardian of the Genome Tetramerization Domain',
     uniprotId: 'P04637',
     pdbCode: '1C26',
-    wikipediaUrl: 'https://en.wikipedia.org/wiki/P53',
     algorithm: 'Algo-V',
     musicalKey: 'C Minor',
     description:
@@ -695,7 +686,6 @@ export const CAMPAIGN_LEVELS: GameLevel[] = [
     moleculeName: 'Oxygen-Transport Heterotetramer (α1, β1, α2, β2)',
     uniprotId: 'P69905',
     pdbCode: '1A3N',
-    wikipediaUrl: 'https://en.wikipedia.org/wiki/Hemoglobin',
     algorithm: 'Fantaisie-Impromptu',
     musicalKey: 'F Major',
     description:
@@ -760,7 +750,6 @@ export const CAMPAIGN_LEVELS: GameLevel[] = [
     moleculeName: 'Tetrameric Selective Pore Complex',
     uniprotId: 'P0A334',
     pdbCode: '1K4C',
-    wikipediaUrl: 'https://en.wikipedia.org/wiki/KcsA_potassium_channel',
     algorithm: 'Algo-V',
     musicalKey: 'A Minor',
     description:
@@ -886,9 +875,6 @@ export function createCustomProteinLevel(
     moleculeName: `User-Defined ${numSubunits}-Domain Ribbon Structure (${validSeq.length} AA)`,
     uniprotId: 'CUSTOM',
     pdbCode: 'USER',
-    wikipediaUrl: `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(
-      title.trim() || 'Protein structure',
-    )}`,
     algorithm,
     musicalKey: 'C Major',
     description: `Custom protein sequence (${validSeq.length} residues) partitioned into ${numSubunits} interactive 3D ribbon domains for quaternary docking and sonification.`,
