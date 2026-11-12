@@ -70,8 +70,8 @@ function generateHelixRibbonChain(
     // Add natural tertiary folding wave along the helix axis
     const foldWave = Math.sin(i * 0.18 + curvePhase) * 2.2
     const x = radius * Math.cos(t) + foldWave
-    const y = radius * Math.sin(t) + Math.cos(i * 0.14) * 1.5
-    const z = (i - sequence.length / 2) * (pitch / 3.6)
+    const y = (i - sequence.length / 2) * (pitch / 3.6)
+    const z = radius * Math.sin(t) + Math.cos(i * 0.14) * 1.5
 
     rawCoords.push([x, y, z])
     sumX += x
@@ -119,10 +119,10 @@ function generateBetaBarrelSection(
     const frac = strandIdx / Math.max(1, Math.ceil(sequence.length / 9))
     const angle = angularStart + frac * angularSpan + Math.sin(posInStrand * 0.4) * 0.12
     const r = barrelRadius + Math.sin(posInStrand * 0.7) * 0.9
-    const x = r * Math.cos(angle)
-    const y = r * Math.sin(angle)
     const dir = strandIdx % 2 === 0 ? 1 : -1
-    const z = (posInStrand - 4) * 1.9 * dir
+    const x = r * Math.cos(angle)
+    const y = (posInStrand - 4) * 1.9 * dir
+    const z = r * Math.sin(angle)
 
     rawCoords.push([x, y, z])
     sumX += x

@@ -158,7 +158,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(function
       controls.target.copy(sphere.center)
       camera.position.set(
         sphere.center.x,
-        sphere.center.y + distance * 0.22,
+        sphere.center.y,
         sphere.center.z + distance,
       )
       camera.updateProjectionMatrix()
