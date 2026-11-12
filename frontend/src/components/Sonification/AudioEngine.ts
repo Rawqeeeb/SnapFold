@@ -19,17 +19,74 @@ export interface TraversalNoteStep {
   chainName: string
 }
 
+// ── Master audio routing bus ────────────────────────────────────────────────
+let _masterBus: Tone.Gain | null = null
+let _speakerGain: Tone.Gain | null = null
+let _recordGain: Tone.Gain | null = null
+let _mediaStreamDest: MediaStreamAudioDestinationNode | null = null
+
 // ── Synth / reverb / filter pipeline ─────────────────────────────────────────
 let _synthRH: Tone.Synth | null = null
 let _synthLH: Tone.Synth | null = null
 let _polySynths: Tone.PolySynth[] = []
 let _reverb: Tone.Freeverb | null = null
 let _dockingFilter: Tone.Filter | null = null
-let _mediaStreamDest: MediaStreamAudioDestinationNode | null = null
 let _styleKey = ''
 
 function styleKey(p: StylePreset) {
   return `${p.oscillatorType}|${p.envelope.attack}|${p.envelope.release}|${p.reverbWet}`
+}
+
+/**
+ * Initializes or returns the master audio routing:
+ * - masterBus: All synths and reverberation feed here.
+ * - speakerGain -> Tone.getDestination(): Path to physical speakers (can be muted during video render).
+ * - recordGain -> mediaStreamDest: Dedicated path to MediaRecorder stream (ALWAYS 100% active, unmuted).
+ */
+export function ensureMasterRouting(): {
+  masterBus: Tone.Gain
+  speakerGain: Tone.Gain
+  recordGain: Tone.Gain
+  mediaStreamDest: MediaStreamAudioDestinationNode | null
+} {
+  const rawCtx = Tone.getContext().rawContext as AudioContext
+
+  if (!_masterBus) {
+    _masterBus = new Tone.Gain(1.0)
+  }
+
+  if (!_speakerGain) {
+    _speakerGain = new Tone.Gain(1.0)
+    _masterBus.connect(_speakerGain)
+    _speakerGain.connect(Tone.getDestination())
+  }
+
+  if (!_recordGain) {
+    _recordGain = new Tone.Gain(1.0)
+    _masterBus.connect(_recordGain)
+  }
+
+  if (!_mediaStreamDest && typeof rawCtx.createMediaStreamDestination === 'function') {
+    try {
+      _mediaStreamDest = rawCtx.createMediaStreamDestination()
+      // Directly connect Tone.Gain to raw Web Audio destination node
+      Tone.connect(_recordGain, _mediaStreamDest)
+    } catch (_) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        _recordGain.connect(_mediaStreamDest as any)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  return {
+    masterBus: _masterBus,
+    speakerGain: _speakerGain,
+    recordGain: _recordGain,
+    mediaStreamDest: _mediaStreamDest,
+  }
 }
 
 export function disposeSynths() {
@@ -50,18 +107,15 @@ export function disposeSynths() {
 
 export function getAudioRecordingStream(): MediaStream | null {
   try {
-    const rawCtx = Tone.getContext().rawContext as AudioContext
-    if (!_mediaStreamDest && typeof rawCtx.createMediaStreamDestination === 'function') {
-      _mediaStreamDest = rawCtx.createMediaStreamDestination()
-      Tone.getDestination().connect(_mediaStreamDest)
-    }
-    return _mediaStreamDest?.stream ?? null
+    const { mediaStreamDest } = ensureMasterRouting()
+    return mediaStreamDest?.stream ?? null
   } catch {
     return null
   }
 }
 
 export function ensurePipeline(preset: StylePreset) {
+  const routing = ensureMasterRouting()
   const key = styleKey(preset)
   if (key === _styleKey && _synthRH && _synthLH && _dockingFilter) return
   disposeSynths()
@@ -75,19 +129,13 @@ export function ensurePipeline(preset: StylePreset) {
     Q: 1.0,
   })
 
-  const output: Tone.InputNode = (() => {
-    if (preset.reverbWet > 0) {
-      _reverb = new Tone.Freeverb({ roomSize: 0.75, dampening: 3500 }).toDestination()
-      _reverb.wet.value = Math.min(0.4, preset.reverbWet)
-      return _reverb
-    }
-    return Tone.getDestination()
-  })()
-
-  _dockingFilter.connect(output)
-
-  if (_mediaStreamDest) {
-    try { Tone.getDestination().connect(_mediaStreamDest) } catch { /* ignore */ }
+  if (preset.reverbWet > 0) {
+    _reverb = new Tone.Freeverb({ roomSize: 0.75, dampening: 3500 })
+    _reverb.wet.value = Math.min(0.4, preset.reverbWet)
+    _dockingFilter.connect(_reverb)
+    _reverb.connect(routing.masterBus)
+  } else {
+    _dockingFilter.connect(routing.masterBus)
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -174,15 +222,19 @@ export function stopPlayback(): void {
   Tone.Transport.cancel()
 }
 
-export function setMasterMuted(muted: boolean): boolean {
+export function setSpeakerMuted(muted: boolean): boolean {
   try {
-    const prev = Tone.getDestination().mute
-    Tone.getDestination().mute = muted
+    const { speakerGain } = ensureMasterRouting()
+    const prev = speakerGain.gain.value === 0
+    speakerGain.gain.value = muted ? 0.0 : 1.0
     return prev
   } catch {
     return false
   }
 }
+
+// Backwards-compatible alias: mutes speaker output, NOT the internal recording stream
+export const setMasterMuted = setSpeakerMuted
 
 /**
  * Solo melody for a single subunit

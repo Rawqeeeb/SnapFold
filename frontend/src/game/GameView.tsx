@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import * as Tone from 'tone'
 import { CAMPAIGN_LEVELS, createSubunitNotes } from './levels'
 import { GameCanvas, type GameCanvasHandle } from './GameCanvas'
 import {
@@ -12,6 +13,7 @@ import {
   scheduleProteinTraversal,
   stopPlayback,
   setMasterMuted,
+  ensurePipeline,
   setAlignmentAudioFeedback,
   playLockCelebration,
   getAudioRecordingStream,
@@ -611,47 +613,65 @@ export function GameView() {
     }
     requestAnimationFrame(renderCompositeFrame)
 
+    // 1. Ensure Tone.js AudioContext is running and pipeline is initialized
+    await Tone.start()
+    await Tone.getContext().resume()
+    ensurePipeline(STYLE_PRESETS[effectiveStyle] || STYLE_PRESETS['Classical'])
+
+    // 2. Capture clean 3D viewport canvas + dedicated unmuted audio recording stream
     const videoStream = compCanvas.captureStream(30)
     const audioStream = getAudioRecordingStream()
+
     const combinedTracks: MediaStreamTrack[] = [...videoStream.getVideoTracks()]
     if (audioStream) {
-      combinedTracks.push(...audioStream.getAudioTracks())
+      const audioTracks = audioStream.getAudioTracks()
+      if (audioTracks.length > 0) {
+        combinedTracks.push(...audioTracks)
+      }
     }
     const combinedStream = new MediaStream(combinedTracks)
 
-    // Prioritize MP4 formats
+    // Prioritize MP4 formats with audio codecs
     const mimeTypes = [
       'video/mp4;codecs=avc1,mp4a.40.2',
+      'video/mp4;codecs=avc1,opus',
       'video/mp4',
       'video/webm;codecs=vp9,opus',
       'video/webm;codecs=vp8,opus',
       'video/webm',
     ]
     const supportedMime = mimeTypes.find((m) => MediaRecorder.isTypeSupported(m)) || ''
+    const isMp4 =
+      supportedMime.includes('mp4') ||
+      (!supportedMime && MediaRecorder.isTypeSupported('video/mp4'))
+    const fileExt = isMp4 ? 'mp4' : 'webm'
+
     const chunks: BlobPart[] = []
     const recorder = new MediaRecorder(
       combinedStream,
-      supportedMime ? { mimeType: supportedMime } : undefined,
+      supportedMime
+        ? { mimeType: supportedMime, audioBitsPerSecond: 128000 }
+        : { audioBitsPerSecond: 128000 },
     )
 
     recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) chunks.push(e.data)
     }
 
-    // MUTE master speaker output so users don't have to listen to the song again while recording
+    // Mute the physical speakers branch only (the recording branch stays at 100% full volume!)
     const prevMuted = setMasterMuted(true)
 
     recorder.onstop = () => {
       animActive = false
       setMasterMuted(prevMuted)
-      const blob = new Blob(chunks, { type: supportedMime || 'video/mp4' })
+      const blob = new Blob(chunks, { type: supportedMime || (isMp4 ? 'video/mp4' : 'video/webm') })
       savedVideoBlobRef.current = { levelId: activeLevel.id, blob }
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
       a.download = `snapfold-level-${activeLevel.levelNumber}-${activeLevel.title
         .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')}.mp4`
+        .replace(/[^a-z0-9]+/g, '-')}.${fileExt}`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
